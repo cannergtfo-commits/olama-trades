@@ -226,7 +226,8 @@ function render(
         const bond = (r.bondingStatus || "?").slice(0, 4);
         const tags = (r.sourceTags && r.sourceTags.length ? r.sourceTags.join("+") : r.source).slice(0, 12);
         const risk = r.liquidityRiskNote ? " !liq" : "";
-        return `${tag} ${r.symbol.padEnd(7)} ${conf} ${bond} spike=${r.volumeSpikeRatio.toFixed(1)}x ${tags}${risk}`;
+        const pa = (r.patternTags && r.patternTags.length ? r.patternTags.join(",") : (r.patternBias || "—")).slice(0, 18);
+        return `${tag} ${r.symbol.padEnd(7)} ${conf} ${bond} pa=${pa} ${tags}${risk}`;
       })
       .join("\n");
     scanBody = `${head}\n${rows}`;

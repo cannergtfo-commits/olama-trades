@@ -31,6 +31,10 @@ import {
   parseKeywords,
   resolveWatchedMints,
 } from "./keywords.js";
+import {
+  analyzePatterns,
+  fetchOhlcvForPair,
+} from "./patterns.js";
 
 export interface ScanReportRow {
   token: CandidateToken;
@@ -44,6 +48,9 @@ export interface ScanReportRow {
   volumeSummary?: string;
   liquidityRiskNote?: string;
   sourceTags?: string[];
+  patternTags?: string[];
+  patternScore?: number;
+  patternBias?: string;
 }
 
 /** Prefer configured buy size, never more than maxBuy, never >= portfolio, leave gas. */
@@ -128,11 +135,57 @@ export async function gatherCandidates(): Promise<{ tokens: CandidateToken[]; no
   }
 
   const merged = mergeCandidates(all);
+  // Candlestick / PA setups (OHLCV when possible, else Dex multi-TF proxies)
+  let patternHits = 0;
+  let ohlcvOk = 0;
+  const patternBudget = Math.min(18, merged.length);
+  for (let i = 0; i < patternBudget; i++) {
+    const t = merged[i];
+    try {
+      let bars = null as Awaited<ReturnType<typeof fetchOhlcvForPair>>;
+      if (t.pairAddress) {
+        bars = await fetchOhlcvForPair(t.pairAddress);
+        if (bars?.length) ohlcvOk++;
+        await sleep(120);
+      }
+      const pa = analyzePatterns(t, bars);
+      t.patternTags = pa.tags;
+      t.patternScore = pa.bullishScore;
+      t.patternBias = pa.bias;
+      t.patternDataQuality = pa.dataQuality;
+      if (pa.tags.length) patternHits++;
+    } catch {
+      t.patternTags = [];
+      t.patternScore = 50;
+      t.patternBias = "neutral";
+      t.patternDataQuality = "thin";
+    }
+  }
+  // Remaining: proxy-only, no network
+  for (let i = patternBudget; i < merged.length; i++) {
+    const t = merged[i];
+    try {
+      const pa = analyzePatterns(t, null);
+      t.patternTags = pa.tags;
+      t.patternScore = pa.bullishScore;
+      t.patternBias = pa.bias;
+      t.patternDataQuality = pa.dataQuality;
+      if (pa.tags.length) patternHits++;
+    } catch {
+      t.patternTags = [];
+      t.patternScore = 50;
+      t.patternBias = "neutral";
+      t.patternDataQuality = "thin";
+    }
+  }
+
   const ranked = enrichAndRank(merged, cfg);
   const pumpN = ranked.filter((t) => t.pumpCallout).length;
+  const bullishPa = ranked.filter((t) => t.patternBias === "bullish").length;
   notes.push(
     `Merged=${merged.length} ranked (minSources=${cfg.minConfluenceSources}, preferGraduated=${cfg.preferGraduated}, preferPump=${cfg.preferPumpCallouts}, pumpCallouts=${pumpN})`
   );
+  notes.push(`Patterns: tagged=${patternHits} bullish=${bullishPa} ohlcv=${ohlcvOk}/${patternBudget}`);
   return { tokens: ranked, notes };
 }
 
@@ -152,6 +205,9 @@ function annotateRow(
     volumeSummary: volumeSummary(token),
     liquidityRiskNote: riskNote,
     sourceTags: sourceTags(token),
+    patternTags: token.patternTags,
+    patternScore: token.patternScore,
+    patternBias: token.patternBias,
     ...extra,
   };
 }
@@ -313,7 +369,7 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
 
   console.log(
     chalk.cyan(
-      `Entering ${token.symbol} (${token.mint.slice(0, 6)}…) size=${sized.size} SOL (bal=${sized.balance.toFixed(4)}, max ${cfg.maxPortfolioBuyPct}% port) dryRun=${cfg.dryRun} conf=${token.confluenceScore ?? "?"} bond=${token.bondingStatus ?? "?"} tags=${sourceTags(token).join("+")}`
+      `Entering ${token.symbol} (${token.mint.slice(0, 6)}…) size=${sized.size} SOL (bal=${sized.balance.toFixed(4)}, max ${cfg.maxPortfolioBuyPct}% port) dryRun=${cfg.dryRun} conf=${token.confluenceScore ?? "?"} bond=${token.bondingStatus ?? "?"} tags=${sourceTags(token).join("+")} pa=${(token.patternTags ?? []).join(",") || "none"} score=${token.patternScore ?? "?"}`
     )
   );
   const swap = await swapSolToToken(token.mint, sized.size);

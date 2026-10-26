@@ -40,6 +40,12 @@ export interface CandidateToken {
   watchedMintMatch?: boolean;
   /** True when discovery includes a Pump.fun family source (callout / launch). */
   pumpCallout?: boolean;
+  /** Candlestick / PA setup tags (short ids). */
+  patternTags?: string[];
+  /** Net bullish pattern score 0–100. */
+  patternScore?: number;
+  patternBias?: "bullish" | "bearish" | "neutral";
+  patternDataQuality?: "ohlcv" | "proxy" | "thin";
 }
 
 export interface FilterResult {
@@ -74,10 +80,12 @@ export function applyFilters(
   if (token.liquidityUsd < filters.minLiquidityUsd) {
     reasons.push(`liquidity $${token.liquidityUsd.toFixed(0)} < min $${filters.minLiquidityUsd}`);
   }
-  if (token.volume24hUsd < filters.minVolume24hUsd) {
+  // minVolume24hUsd <= 0 disables the volume gate
+  if (filters.minVolume24hUsd > 0 && token.volume24hUsd < filters.minVolume24hUsd) {
     reasons.push(`volume24h $${token.volume24hUsd.toFixed(0)} < min $${filters.minVolume24hUsd}`);
   }
-  if (token.volumeSpikeRatio < filters.minVolumeSpikeRatio) {
+  // minVolumeSpikeRatio <= 0 disables the spike gate
+  if (filters.minVolumeSpikeRatio > 0 && token.volumeSpikeRatio < filters.minVolumeSpikeRatio) {
     reasons.push(
       `volume spike ${token.volumeSpikeRatio.toFixed(2)}x < min ${filters.minVolumeSpikeRatio}x`
     );
@@ -106,15 +114,16 @@ export function applyFilters(
         `top10 holders ${safety.top10HolderPercent.toFixed(1)}% > max ${filters.maxTop10HolderPercent}%`
       );
     }
-    // Bundler / insider concentration — fail closed when % cannot be determined
+    // Bundler: maxBundlerPercent < 0 disables the check (unknown does NOT block)
     if (filters.maxBundlerPercent >= 0) {
-      if (safety.bundlerPercent === undefined || !Number.isFinite(safety.bundlerPercent)) {
-        reasons.push("bundler % unknown — blocked");
-      } else if (safety.bundlerPercent >= filters.maxBundlerPercent) {
-        reasons.push(
-          `bundler ${safety.bundlerPercent.toFixed(2)}% >= max ${filters.maxBundlerPercent}%`
-        );
+      if (safety.bundlerPercent !== undefined && Number.isFinite(safety.bundlerPercent)) {
+        if (safety.bundlerPercent >= filters.maxBundlerPercent) {
+          reasons.push(
+            `bundler ${safety.bundlerPercent.toFixed(2)}% >= max ${filters.maxBundlerPercent}%`
+          );
+        }
       }
+      // When bundler % unknown and gate is on, do NOT block (user disabled fail-closed)
     }
     if (filters.requireMintAuthorityRevoked && safety.mintAuthority !== null && safety.mintAuthority !== undefined) {
       if (safety.mintAuthority !== "revoked") {
@@ -202,10 +211,10 @@ export function describeFilters(f: FilterConfig): string {
   return [
     `maxTopHolderPercent = ${f.maxTopHolderPercent}`,
     `maxTop10HolderPercent = ${f.maxTop10HolderPercent}`,
-    `maxBundlerPercent = ${f.maxBundlerPercent}`,
+    `maxBundlerPercent = ${f.maxBundlerPercent}${f.maxBundlerPercent < 0 ? " (off)" : ""}`,
     `minLiquidityUsd = ${f.minLiquidityUsd}`,
-    `minVolume24hUsd = ${f.minVolume24hUsd}`,
-    `minVolumeSpikeRatio = ${f.minVolumeSpikeRatio}`,
+    `minVolume24hUsd = ${f.minVolume24hUsd}${f.minVolume24hUsd <= 0 ? " (off)" : ""}`,
+    `minVolumeSpikeRatio = ${f.minVolumeSpikeRatio}${f.minVolumeSpikeRatio <= 0 ? " (off)" : ""}`,
     `minTokenAgeMinutes = ${f.minTokenAgeMinutes}`,
     `maxTokenAgeMinutes = ${f.maxTokenAgeMinutes}`,
     `requireMintAuthorityRevoked = ${f.requireMintAuthorityRevoked}`,

@@ -23,6 +23,9 @@ export interface LastScanRowView {
   liquidityRiskNote?: string;
   sourceTags?: string[];
   momentumHint?: string;
+  patternTags?: string[];
+  patternScore?: number;
+  patternBias?: string;
 }
 
 export interface LastScanCache {
@@ -62,6 +65,9 @@ export function saveLastScan(rows: ScanReportRow[], notes?: string[]): LastScanC
       liquidityRiskNote: r.liquidityRiskNote,
       sourceTags: r.sourceTags ?? r.token.sourceTagList,
       momentumHint: r.token.momentumHint,
+      patternTags: r.patternTags ?? r.token.patternTags,
+      patternScore: r.patternScore ?? r.token.patternScore,
+      patternBias: r.patternBias ?? r.token.patternBias,
     })),
   };
   const dir = path.dirname(PATH);

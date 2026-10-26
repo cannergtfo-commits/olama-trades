@@ -11,7 +11,7 @@ dotenv.config({ path: path.join(ROOT, ".env") });
 export interface FilterConfig {
   maxTopHolderPercent: number;
   maxTop10HolderPercent: number;
-  /** Block buys when bundler/insider concentration % >= this (fail-closed if unknown). */
+  /** Block buys when bundler % >= this. Set < 0 to disable (unknown never blocks). */
   maxBundlerPercent: number;
   minLiquidityUsd: number;
   minVolume24hUsd: number;

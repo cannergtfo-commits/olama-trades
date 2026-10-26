@@ -128,6 +128,18 @@ export function scoreConfluence(token: CandidateToken, cfg: AppConfig): number {
     }
   }
 
+  // Candlestick / PA setups (solana-skill) — prefer bullish confluence
+  if (typeof token.patternScore === "number" && Number.isFinite(token.patternScore)) {
+    // Map 0–100 pattern score around 50 → ±14 to score
+    const delta = (token.patternScore - 50) / 50; // -1..+1
+    score += Math.max(-14, Math.min(14, delta * 14));
+  }
+  if (token.patternBias === "bullish" && (token.patternTags?.length ?? 0) > 0) {
+    score += 6;
+  } else if (token.patternBias === "bearish") {
+    score -= 5;
+  }
+
   return Math.max(0, Math.min(100, Math.round(score * 10) / 10));
 }
 
@@ -171,6 +183,10 @@ export function mergeCandidates(tokens: CandidateToken[]): CandidateToken[] {
       url: t.url || prev.url,
       watchedMintMatch: Boolean(prev.watchedMintMatch || t.watchedMintMatch),
       twitterTrending: Boolean(prev.twitterTrending || t.twitterTrending) || undefined,
+      patternTags: (t.patternScore ?? 0) >= (prev.patternScore ?? 0) ? t.patternTags ?? prev.patternTags : prev.patternTags ?? t.patternTags,
+      patternScore: maxUndef(prev.patternScore, t.patternScore),
+      patternBias: (t.patternScore ?? 0) >= (prev.patternScore ?? 0) ? t.patternBias ?? prev.patternBias : prev.patternBias ?? t.patternBias,
+      patternDataQuality: t.patternDataQuality === "ohlcv" || prev.patternDataQuality === "ohlcv" ? "ohlcv" : t.patternDataQuality ?? prev.patternDataQuality,
     };
     map.set(t.mint, richer);
   }
@@ -235,6 +251,10 @@ export function enrichAndRank(tokens: CandidateToken[], cfg: AppConfig): Candida
       const gb = b.bondingStatus === "graduated" ? 1 : 0;
       if (gb !== ga) return gb - ga;
     }
+    // Prefer stronger bullish candle setups on ties
+    const pa = a.patternScore ?? 50;
+    const pb = b.patternScore ?? 50;
+    if (pb !== pa) return pb - pa;
     return (b.volumeSpikeRatio || 0) - (a.volumeSpikeRatio || 0);
   });
   return out;
@@ -266,6 +286,9 @@ export function sortForTryEnter<T extends { token: CandidateToken; confluenceSco
     const ca = a.confluenceScore ?? a.token.confluenceScore ?? 0;
     const cb = b.confluenceScore ?? b.token.confluenceScore ?? 0;
     if (cb !== ca) return cb - ca;
+    const pa = a.token.patternScore ?? 50;
+    const pb = b.token.patternScore ?? 50;
+    if (pb !== pa) return pb - pa;
     return (b.token.volumeSpikeRatio || 0) - (a.token.volumeSpikeRatio || 0);
   });
 }

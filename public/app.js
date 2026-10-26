@@ -144,9 +144,9 @@ function renderScan(snap) {
     return;
   }
   $("scan").innerHTML = `
-    <p class="meta" style="margin:0 0 8px">Cached ${fmtTime(ls.at)} · confluence / bonding / multi-TF</p>
+    <p class="meta" style="margin:0 0 8px">Cached ${fmtTime(ls.at)} · confluence / bonding / candle patterns</p>
     <table>
-      <thead><tr><th></th><th>Symbol</th><th>Conf</th><th>Bond</th><th>Spike</th><th>Vol TF</th><th>Tags</th><th>Risk</th><th>Mint</th></tr></thead>
+      <thead><tr><th></th><th>Symbol</th><th>Conf</th><th>Bond</th><th>Patterns</th><th>Vol TF</th><th>Tags</th><th>Risk</th><th>Mint</th></tr></thead>
       <tbody>
         ${ls.rows
           .slice(0, 25)
@@ -156,7 +156,7 @@ function renderScan(snap) {
             <td>${r.symbol}</td>
             <td>${r.confluenceScore != null ? Number(r.confluenceScore).toFixed(0) : "—"}</td>
             <td>${r.bondingStatus || "—"}</td>
-            <td>${Number(r.volumeSpikeRatio).toFixed(2)}x</td>
+            <td title="score=${r.patternScore != null ? r.patternScore : "?"} bias=${r.patternBias || "?"}">${(r.patternTags && r.patternTags.length) ? r.patternTags.join(", ") : (r.patternBias || "—")}</td>
             <td title="${r.volumeSummary || ""}">${r.volumeSummary ? r.volumeSummary.replace(/ /g, " · ") : "$" + Math.round(r.volume24hUsd)}</td>
             <td>${(r.sourceTags && r.sourceTags.length ? r.sourceTags.join("+") : r.source)}</td>
             <td title="${r.liquidityRiskNote || r.momentumHint || ""}">${r.liquidityRiskNote ? "⚠" : (r.momentumHint || "—")}</td>

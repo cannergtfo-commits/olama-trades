@@ -10,10 +10,10 @@
   "filters": {
     "maxTopHolderPercent": 15,
     "maxTop10HolderPercent": 50,
-    "maxBundlerPercent": 1,
+    "maxBundlerPercent": -1,
     "minLiquidityUsd": 0,
-    "minVolume24hUsd": 5000,
-    "minVolumeSpikeRatio": 2,
+    "minVolume24hUsd": 0,
+    "minVolumeSpikeRatio": 0,
     "minTokenAgeMinutes": 0,
     "maxTokenAgeMinutes": 9999999,
     "requireMintAuthorityRevoked": true,
