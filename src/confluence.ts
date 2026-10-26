@@ -260,8 +260,31 @@ export function enrichAndRank(tokens: CandidateToken[], cfg: AppConfig): Candida
   return out;
 }
 
+/** minSources <= 0 disables the confluence gate (risk-on / experimental). */
 export function meetsMinConfluence(token: CandidateToken, minSources: number): boolean {
-  return sourceTags(token).length >= Math.max(1, minSources);
+  if (minSources <= 0) return true;
+  return sourceTags(token).length >= minSources;
+}
+
+/**
+ * Good indicator / candlestick setup for risk-on entries.
+ * Bullish bias, patternScore above threshold, or mom+ hint.
+ */
+export function hasGoodSetup(
+  token: CandidateToken,
+  minPatternScore = 58
+): boolean {
+  if (token.patternBias === "bullish") return true;
+  if (typeof token.patternScore === "number" && token.patternScore >= minPatternScore) {
+    return true;
+  }
+  const hint = token.momentumHint ?? "";
+  if (hint.startsWith("mom+")) return true;
+  // Explicit bullish pattern tags even if bias neutralized
+  const tags = token.patternTags ?? [];
+  const bullTags = ["hammer", "bull_engulf", "maru_bull", "3soldiers"];
+  if (tags.some((t) => bullTags.includes(t))) return true;
+  return false;
 }
 
 export function liquidityRiskNote(token: CandidateToken, maxRatio: number): string | undefined {
@@ -272,7 +295,7 @@ export function liquidityRiskNote(token: CandidateToken, maxRatio: number): stri
   return `liqRisk=${risk} vol/liq=${rLabel} (soft; maxRatio=${maxRatio})`;
 }
 
-/** Order pass rows for tryEnter: Pump.fun callouts first, then confluence. */
+/** Order pass rows for tryEnter: Pump soft priority, then patterns (risk-on), then confluence. */
 export function sortForTryEnter<T extends { token: CandidateToken; confluenceScore?: number }>(
   rows: T[],
   cfg: AppConfig
@@ -281,6 +304,15 @@ export function sortForTryEnter<T extends { token: CandidateToken; confluenceSco
     if (cfg.preferPumpCallouts) {
       const pa = a.token.pumpCallout || sourceTags(a.token).includes("pump") ? 1 : 0;
       const pb = b.token.pumpCallout || sourceTags(b.token).includes("pump") ? 1 : 0;
+      if (pb !== pa) return pb - pa;
+    }
+    // Risk-on: prioritize bullish candle/indicator setups over raw confluence
+    if (cfg.riskOnTest) {
+      const ba = a.token.patternBias === "bullish" ? 1 : 0;
+      const bb = b.token.patternBias === "bullish" ? 1 : 0;
+      if (bb !== ba) return bb - ba;
+      const pa = a.token.patternScore ?? 50;
+      const pb = b.token.patternScore ?? 50;
       if (pb !== pa) return pb - pa;
     }
     const ca = a.confluenceScore ?? a.token.confluenceScore ?? 0;

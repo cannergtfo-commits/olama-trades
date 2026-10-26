@@ -1,6 +1,6 @@
 # Solana Terminal Trading Bot (experimental)
 
-Node.js + TypeScript CLI bot that scans **DexScreener**, **Pump.fun**, and **Jupiter** (organic + recent), ranks by **multi-source confluence**, multi-timeframe volume, bonding/graduation status, and light momentum — then applies **risk filters** (including **max top-holder %** / bundler), buys a configured SOL size, and exits on **+10% take-profit** or **−25% stop-loss**.
+Node.js + TypeScript CLI bot that scans **DexScreener**, **Pump.fun**, and **Jupiter** (organic + recent), ranks by **multi-source confluence**, multi-timeframe volume, bonding/graduation status, and light momentum — then applies **risk filters** (or experimental **risk-on pattern** mode), buys a configured SOL size, and exits on **+10% take-profit** or **−25% stop-loss**.
 
 Includes a terminal dashboard, browser UI, and **chat with Techno** (your Grok co-pilot).
 
@@ -119,6 +119,21 @@ API: `GET /api/chat` · `POST /api/chat` body `{ "text": "…" }` (also accepts 
 | `web` | Browser dashboard + chat |
 | `status` / `history` | Wallet + tx log |
 
+## Experimental risk-on test (patterns / indicators)
+
+> **Intentional high-risk experiment.** Entry blockers (holder %, mint/freeze authority, bundler, volume/spike, liquidity floors, preferGraduated hard gates, confluence min sources, Twitter hard-fail) are **disabled**. The bot ranks and buys on **bullish candlestick / indicator setups** (`patterns.ts` + solana-skill) and still keeps portfolio caps: buy size / `maxPortfolioBuyPct=90` / `minSolReserve=0.01` / TP **+10%** / SL **−25%** / `maxOpenPositions`. Pump.fun callouts remain a **soft** priority. `DRY_RUN=false` only when you set it.
+
+| Knob | Risk-on value | Meaning |
+|------|---------------|---------|
+| `riskOnTest` / `RISK_ON_TEST` | `true` | Pattern/indicator entry mode |
+| `minPatternScore` / `MIN_PATTERN_SCORE` | `58` | Min setup score when bias ≠ bullish |
+| `minConfluenceSources` | `0` | Confluence gate off |
+| `preferGraduated` | `false` | Soft rank only (no hard block) |
+| Holder / authority filters | off (`100` / `false`) | No RPC fail-closed on holders |
+| Volume / spike / bundler / liq min | off | Already soft/disabled |
+
+Flip `RISK_ON_TEST=false` and restore filter caps to return to the safer gated mode.
+
 ## Filters (buy blockers)
 
 - `maxTopHolderPercent` — default `20` (often tightened to `15`)
@@ -152,10 +167,12 @@ Before `tryEnter`, candidates are merged across sources and scored:
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `minConfluenceSources` | `1` | Set `2` to require multi-platform hits (may starve thin APIs) |
+| `minConfluenceSources` | `0` (risk-on) / `1` | `≤0` disables gate; `2` requires multi-platform |
 | `maxVolumeToLiquidityRatio` | `40` | Soft risk threshold for vol/liq |
-| `preferGraduated` | `true` | Downrank / soft-block lone bonding-curve tokens |
+| `preferGraduated` | `false` (risk-on) | Soft rank only when risk-on; hard-block off |
 | `preferPumpCallouts` | `true` | Rank Pump.fun sources first for tryEnter |
+| `riskOnTest` | `true` (this test) | Pattern/indicator entries; see section above |
+| `minPatternScore` | `58` | Bullish setup threshold |
 
 Env aliases: `MIN_CONFLUENCE_SOURCES`, `MAX_VOLUME_TO_LIQUIDITY_RATIO`, `PREFER_GRADUATED`, `PREFER_PUMP_CALLOUTS`, `TWITTER_KEYWORDS`.
 

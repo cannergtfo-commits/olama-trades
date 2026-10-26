@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { addTx } from "./history.js";
 import {
   enrichAndRank,
+  hasGoodSetup,
   liquidityRiskNote,
   meetsMinConfluence,
   mergeCandidates,
@@ -183,7 +184,7 @@ export async function gatherCandidates(): Promise<{ tokens: CandidateToken[]; no
   const pumpN = ranked.filter((t) => t.pumpCallout).length;
   const bullishPa = ranked.filter((t) => t.patternBias === "bullish").length;
   notes.push(
-    `Merged=${merged.length} ranked (minSources=${cfg.minConfluenceSources}, preferGraduated=${cfg.preferGraduated}, preferPump=${cfg.preferPumpCallouts}, pumpCallouts=${pumpN})`
+    `Merged=${merged.length} ranked (minSources=${cfg.minConfluenceSources}, preferGraduated=${cfg.preferGraduated}, preferPump=${cfg.preferPumpCallouts}, riskOn=${cfg.riskOnTest}, pumpCallouts=${pumpN})`
   );
   notes.push(`Patterns: tagged=${patternHits} bullish=${bullishPa} ohlcv=${ohlcvOk}/${patternBudget}`);
   return { tokens: ranked, notes };
@@ -218,7 +219,8 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
   for (const n of notes) console.log(chalk.dim(`  · ${n}`));
 
   const rows: ScanReportRow[] = [];
-  // Prefer high-confluence first (already sorted), then market filters, then deep RPC
+  const riskOn = cfg.riskOnTest;
+  // Prefer high-confluence / pattern setups first, then market filters, then deep RPC
   const pre = tokens.map((token) => {
     const fr = applyFilters(token, cfg.filters);
     if (!meetsMinConfluence(token, cfg.minConfluenceSources)) {
@@ -227,15 +229,17 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       );
       fr.pass = false;
     }
-    // Soft liquidity risk: never hard-fail (minLiquidityUsd may be 0), but annotate
-    const riskNote = liquidityRiskNote(token, cfg.maxVolumeToLiquidityRatio);
-    if (riskNote && token.liquidityRisk === "high" && (token.confluenceScore ?? 0) < 40) {
-      fr.reasons.push(`${riskNote} — need higher confluence for high liq risk`);
-      fr.pass = false;
+    // Soft liquidity risk hard-fail — DISABLED in risk-on test
+    if (!riskOn) {
+      const riskNote = liquidityRiskNote(token, cfg.maxVolumeToLiquidityRatio);
+      if (riskNote && token.liquidityRisk === "high" && (token.confluenceScore ?? 0) < 40) {
+        fr.reasons.push(`${riskNote} — need higher confluence for high liq risk`);
+        fr.pass = false;
+      }
     }
-    // Prefer graduated for routability when configured — soft downrank already in score;
-    // if still on curve AND preferGraduated, require at least 2 sources or organic score
+    // Prefer graduated hard gate — DISABLED in risk-on test (soft rank only)
     if (
+      !riskOn &&
       cfg.preferGraduated &&
       token.bondingStatus === "bonding" &&
       sourceTags(token).length < 2 &&
@@ -244,10 +248,17 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       fr.reasons.push("still on bonding curve — prefer graduated (or more sources/organic)");
       fr.pass = false;
     }
+    // Risk-on / pattern mode: require bullish candle or indicator setup
+    if (riskOn && !hasGoodSetup(token, cfg.minPatternScore)) {
+      fr.reasons.push(
+        `no bullish setup (bias=${token.patternBias ?? "?"} score=${token.patternScore ?? "?"} mom=${token.momentumHint ?? "n/a"})`
+      );
+      fr.pass = false;
+    }
     return { token, fr };
   });
 
-  const deepLimit = 5;
+  const deepLimit = riskOn ? 8 : 5;
   let deepDone = 0;
 
   for (const { token, fr: preFr } of pre.slice(0, 40)) {
@@ -259,16 +270,47 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       rows.push(
         annotateRow(token, {
           pass: false,
-          reasons: ["passed market+confluence; skipped deep RPC (limit) — raise with private RPC"],
+          reasons: [
+            riskOn
+              ? "passed pattern setup; skipped deep quote (limit)"
+              : "passed market+confluence; skipped deep RPC (limit) — raise with private RPC",
+          ],
         })
       );
       continue;
     }
     deepDone++;
-    const safety = await checkTokenSafety(token.mint);
+    // Risk-on: skip holder/authority RPC fail-closed; still annotate lightly when cheap
+    let safety = undefined as Awaited<ReturnType<typeof checkTokenSafety>> | undefined;
+    let safetyNote: string | undefined;
+    if (!riskOn) {
+      safety = await checkTokenSafety(token.mint);
+      safetyNote = [
+        safety.topHolderPercent !== undefined ? `top=${safety.topHolderPercent.toFixed(1)}%` : null,
+        safety.top10HolderPercent !== undefined
+          ? `top10=${safety.top10HolderPercent.toFixed(1)}%`
+          : null,
+        safety.bundlerPercent !== undefined
+          ? `bundler=${safety.bundlerPercent.toFixed(2)}%${
+              safety.bundlerSource ? `@${safety.bundlerSource}` : ""
+            }`
+          : "bundler=unknown",
+        safety.mintAuthority ? `mintAuth=${safety.mintAuthority}` : null,
+        safety.freezeAuthority ? `freezeAuth=${safety.freezeAuthority}` : null,
+        ...(safety.errors ?? []).map((e) => `rpc:${e.slice(0, 60)}`),
+      ]
+        .filter(Boolean)
+        .join(", ");
+    } else {
+      safetyNote = "risk-on: holder/authority RPC skipped";
+    }
     const fr = applyFilters(token, cfg.filters, safety);
     if (!meetsMinConfluence(token, cfg.minConfluenceSources)) {
       fr.reasons.push(`confluence sources < min ${cfg.minConfluenceSources}`);
+      fr.pass = false;
+    }
+    if (riskOn && !hasGoodSetup(token, cfg.minPatternScore)) {
+      fr.reasons.push(`no bullish setup (score=${token.patternScore ?? "?"})`);
       fr.pass = false;
     }
     const watchedNow = resolveWatchedMints(cfg);
@@ -276,19 +318,24 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
     const tw = await checkTwitterSignal(token, { watchedMints: watchedNow });
     token.twitterTrending = tw.trending;
     if (tw.watchedMintMatch) token.watchedMintMatch = true;
-    // Re-score lightly after twitter (optional bump already in scoreConfluence)
     let jupiterOk: boolean | undefined;
+    // Twitter: hard fail when NOT risk-on; soft annotate in risk-on test
     if (!tw.trending) {
-      fr.reasons.push(`twitter: ${tw.detail}`);
-      fr.pass = false;
-    } else if (fr.pass) {
+      if (riskOn) {
+        fr.reasons.push(`twitter soft: ${tw.detail}`);
+      } else {
+        fr.reasons.push(`twitter: ${tw.detail}`);
+        fr.pass = false;
+      }
+    }
+    if (fr.pass) {
       const q = await quoteBuySolForToken(token.mint, Math.min(0.01, cfg.buyAmountSol));
       jupiterOk = q.ok;
       if (!q.ok) {
         fr.reasons.push(`jupiter route: ${q.error ?? "no route"}`);
         fr.pass = false;
         if (token.bondingStatus === "bonding") {
-          fr.reasons.push("on bonding curve — no Jupiter route (prefer graduated)");
+          fr.reasons.push("on bonding curve — no Jupiter route");
         }
       }
     }
@@ -297,25 +344,10 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       annotateRow(token, fr, {
         twitter: tw.detail,
         jupiterOk,
-        safetyNote: [
-          safety.topHolderPercent !== undefined ? `top=${safety.topHolderPercent.toFixed(1)}%` : null,
-          safety.top10HolderPercent !== undefined
-            ? `top10=${safety.top10HolderPercent.toFixed(1)}%`
-            : null,
-          safety.bundlerPercent !== undefined
-            ? `bundler=${safety.bundlerPercent.toFixed(2)}%${
-                safety.bundlerSource ? `@${safety.bundlerSource}` : ""
-              }`
-            : "bundler=unknown",
-          safety.mintAuthority ? `mintAuth=${safety.mintAuthority}` : null,
-          safety.freezeAuthority ? `freezeAuth=${safety.freezeAuthority}` : null,
-          ...(safety.errors ?? []).map((e) => `rpc:${e.slice(0, 60)}`),
-        ]
-          .filter(Boolean)
-          .join(", "),
+        safetyNote,
       })
     );
-    await sleep(1200);
+    await sleep(riskOn ? 600 : 1200);
   }
 
   // Keep confluence-ranked order in the report
@@ -325,6 +357,7 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
 
 export async function tryEnter(token: CandidateToken): Promise<Position | null> {
   const cfg = loadConfig();
+  const riskOn = cfg.riskOnTest;
   if (openPositions().length >= cfg.maxOpenPositions) {
     console.log(chalk.yellow("Max open positions reached — skip entry"));
     return null;
@@ -343,13 +376,30 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
     return null;
   }
 
-  const safety = await checkTokenSafety(token.mint);
+  if (riskOn && !hasGoodSetup(token, cfg.minPatternScore)) {
+    console.log(
+      chalk.yellow(
+        `Skip ${token.symbol}: no bullish setup (bias=${token.patternBias ?? "?"} score=${token.patternScore ?? "?"})`
+      )
+    );
+    return null;
+  }
+
+  // Risk-on: skip holder/authority RPC gates; still apply market filters (mostly off)
+  const safety = riskOn ? undefined : await checkTokenSafety(token.mint);
   const fr = applyFilters(token, cfg.filters, safety);
   const watchedNow = resolveWatchedMints(cfg);
   if (candidateMatchesWatchedMint(token, watchedNow)) token.watchedMintMatch = true;
   const tw = await checkTwitterSignal(token, { watchedMints: watchedNow });
   if (tw.watchedMintMatch) token.watchedMintMatch = true;
-  if (!tw.trending) fr.reasons.push(`twitter: ${tw.detail}`), (fr.pass = false);
+  if (!tw.trending) {
+    if (riskOn) {
+      fr.reasons.push(`twitter soft: ${tw.detail}`);
+    } else {
+      fr.reasons.push(`twitter: ${tw.detail}`);
+      fr.pass = false;
+    }
+  }
   if (!fr.pass) {
     console.log(chalk.red(`Blocked ${token.symbol}: ${fr.reasons.join("; ")}`));
     return null;
@@ -484,7 +534,7 @@ export async function runLoop(opts: { once?: boolean } = {}): Promise<void> {
   setArmed(true);
   console.log(
     chalk.bold(
-      `\nBot run loop — BOT ON — dryRun=${cfg.dryRun} buy=${cfg.buyAmountSol} SOL TP=+${cfg.takeProfitPct}% SL=-${cfg.stopLossPct}% interval=${cfg.scanIntervalMs}ms confluence≥${cfg.minConfluenceSources}\n`
+      `\nBot run loop — BOT ON — dryRun=${cfg.dryRun} buy=${cfg.buyAmountSol} SOL TP=+${cfg.takeProfitPct}% SL=-${cfg.stopLossPct}% interval=${cfg.scanIntervalMs}ms confluence≥${cfg.minConfluenceSources} riskOn=${cfg.riskOnTest}\n`
     )
   );
 

@@ -57,6 +57,13 @@ export interface AppConfig {
   preferGraduated: boolean;
   /** Rank Pump.fun-sourced callouts / launches ahead of dex/jup-only hits. */
   preferPumpCallouts: boolean;
+  /**
+   * Experimental risk-on test: disable holder/authority/confluence hard gates;
+   * enter on bullish candle/indicator setups only. Portfolio caps + TP/SL remain.
+   */
+  riskOnTest: boolean;
+  /** Min patternScore (0–100) to treat as a setup when bias is not already bullish. */
+  minPatternScore: number;
   jupiterApiKey?: string;
   xBearerToken?: string;
   heliusApiKey?: string;
@@ -167,6 +174,8 @@ export function loadConfig(): AppConfig {
     ),
     preferGraduated: bool(process.env.PREFER_GRADUATED, file.preferGraduated ?? true),
     preferPumpCallouts: bool(process.env.PREFER_PUMP_CALLOUTS, file.preferPumpCallouts ?? true),
+    riskOnTest: bool(process.env.RISK_ON_TEST, file.riskOnTest ?? false),
+    minPatternScore: num(process.env.MIN_PATTERN_SCORE, file.minPatternScore ?? 58),
     jupiterApiKey: process.env.JUPITER_API_KEY || undefined,
     xBearerToken: process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN || undefined,
     heliusApiKey: process.env.HELIUS_API_KEY || undefined,

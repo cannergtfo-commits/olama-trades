@@ -101,12 +101,20 @@ export function applyFilters(
   }
 
   if (safety) {
-    if (safety.topHolderPercent !== undefined && safety.topHolderPercent > filters.maxTopHolderPercent) {
+    // Holder caps: >= 100 disables the gate (risk-on / experimental)
+    const holderGateOn = filters.maxTopHolderPercent < 100;
+    const top10GateOn = filters.maxTop10HolderPercent < 100;
+    if (
+      holderGateOn &&
+      safety.topHolderPercent !== undefined &&
+      safety.topHolderPercent > filters.maxTopHolderPercent
+    ) {
       reasons.push(
         `top holder ${safety.topHolderPercent.toFixed(1)}% > max ${filters.maxTopHolderPercent}%`
       );
     }
     if (
+      top10GateOn &&
       safety.top10HolderPercent !== undefined &&
       safety.top10HolderPercent > filters.maxTop10HolderPercent
     ) {
@@ -123,7 +131,6 @@ export function applyFilters(
           );
         }
       }
-      // When bundler % unknown and gate is on, do NOT block (user disabled fail-closed)
     }
     if (filters.requireMintAuthorityRevoked && safety.mintAuthority !== null && safety.mintAuthority !== undefined) {
       if (safety.mintAuthority !== "revoked") {
@@ -139,8 +146,9 @@ export function applyFilters(
         reasons.push(`freeze authority still set (${safety.freezeAuthority})`);
       }
     }
-    // Incomplete holder/RPC data: fail closed when top-holder rules cannot be verified
+    // Incomplete holder/RPC data: fail closed ONLY when holder gates are active
     if (
+      (holderGateOn || top10GateOn) &&
       (safety.topHolderPercent === undefined || safety.top10HolderPercent === undefined) &&
       (safety.errors?.length || safety.notes?.some((n) => n.includes("largest")))
     ) {
@@ -209,10 +217,10 @@ export function parseFilterSet(
 
 export function describeFilters(f: FilterConfig): string {
   return [
-    `maxTopHolderPercent = ${f.maxTopHolderPercent}`,
-    `maxTop10HolderPercent = ${f.maxTop10HolderPercent}`,
+    `maxTopHolderPercent = ${f.maxTopHolderPercent}${f.maxTopHolderPercent >= 100 ? " (off)" : ""}`,
+    `maxTop10HolderPercent = ${f.maxTop10HolderPercent}${f.maxTop10HolderPercent >= 100 ? " (off)" : ""}`,
     `maxBundlerPercent = ${f.maxBundlerPercent}${f.maxBundlerPercent < 0 ? " (off)" : ""}`,
-    `minLiquidityUsd = ${f.minLiquidityUsd}`,
+    `minLiquidityUsd = ${f.minLiquidityUsd}${f.minLiquidityUsd <= 0 ? " (off)" : ""}`,
     `minVolume24hUsd = ${f.minVolume24hUsd}${f.minVolume24hUsd <= 0 ? " (off)" : ""}`,
     `minVolumeSpikeRatio = ${f.minVolumeSpikeRatio}${f.minVolumeSpikeRatio <= 0 ? " (off)" : ""}`,
     `minTokenAgeMinutes = ${f.minTokenAgeMinutes}`,
