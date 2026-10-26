@@ -8,6 +8,7 @@ import path from "node:path";
 import { loadConfig, ROOT } from "./config.js";
 import { loadBotState, markTick, markTicking } from "./bot-state.js";
 import { monitorPositions, scanOnce, tryEnter } from "./strategy.js";
+import { sortForTryEnter } from "./confluence.js";
 
 const LOCK_PATH = path.join(ROOT, "data", "engine.lock");
 
@@ -73,9 +74,10 @@ async function tickOnce(): Promise<void> {
     await monitorPositions();
     const rows = await scanOnce();
     // High-confluence first (scanOnce sorts by score)
-    const passes = rows
-      .filter((r) => r.filterPass)
-      .sort((a, b) => (b.confluenceScore ?? 0) - (a.confluenceScore ?? 0));
+    const passes = sortForTryEnter(
+      rows.filter((r) => r.filterPass),
+      loadConfig()
+    );
     for (const r of passes.slice(0, 5)) {
       if (!loadBotState().armed) break;
       await tryEnter(r.token);
