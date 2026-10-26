@@ -3,7 +3,7 @@ import { loadConfig } from "./config.js";
 import { applyFilters, type CandidateToken } from "./filters.js";
 import { checkTokenSafety } from "./security-checks.js";
 import { getBalanceSol } from "./wallet.js";
-import { scanDexScreenerBoosts } from "./scanners/dexscreener.js";
+import { scanDexScreenerBoosts, fetchTokensByMints, getTokenPriceUsd } from "./scanners/dexscreener.js";
 import { scanPumpFun } from "./scanners/pumpfun.js";
 import { jupiterPriceUsd, quoteBuySolForToken, scanJupiterOrganic } from "./scanners/jupiter.js";
 import { checkTwitterSignal } from "./signals/twitter.js";
@@ -15,7 +15,6 @@ import {
   openPositions,
   type Position,
 } from "./positions.js";
-import { getTokenPriceUsd } from "./scanners/dexscreener.js";
 import { randomUUID } from "node:crypto";
 import { addTx } from "./history.js";
 import {
@@ -23,9 +22,15 @@ import {
   liquidityRiskNote,
   meetsMinConfluence,
   mergeCandidates,
+  sortForTryEnter,
   sourceTags,
   volumeSummary,
 } from "./confluence.js";
+import {
+  candidateMatchesWatchedMint,
+  parseKeywords,
+  resolveWatchedMints,
+} from "./keywords.js";
 
 export interface ScanReportRow {
   token: CandidateToken;
@@ -89,6 +94,25 @@ export async function gatherCandidates(): Promise<{ tokens: CandidateToken[]; no
     notes.push(`Jupiter discovery error: ${(e as Error).message}`);
   }
 
+  // Watched mint keywords (contract addresses) → fetch Dex pairs + mark match
+  const hotPreview = all
+    .slice()
+    .sort((a, b) => (b.volumeSpikeRatio || 0) - (a.volumeSpikeRatio || 0))
+    .slice(0, 5)
+    .map((t) => t.mint);
+  const watched = resolveWatchedMints(cfg, { hotScanMints: hotPreview });
+  const { mints: configuredMints } = parseKeywords(cfg.twitter.keywords);
+  if (watched.length) {
+    notes.push(`Watched mints: ${watched.length} (configured=${configuredMints.length})`);
+    try {
+      const watchedTokens = await fetchTokensByMints(watched);
+      notes.push(`Watched-mint Dex lookup: ${watchedTokens.length} pairs`);
+      all.push(...watchedTokens);
+    } catch (e) {
+      notes.push(`Watched-mint lookup error: ${(e as Error).message}`);
+    }
+  }
+
   // Fill missing prices via Jupiter
   const needPrice = all.filter((t) => !(t.priceUsd > 0)).map((t) => t.mint);
   if (needPrice.length) {
@@ -98,10 +122,16 @@ export async function gatherCandidates(): Promise<{ tokens: CandidateToken[]; no
     }
   }
 
+  // Flag any candidate whose mint is on the watch list
+  for (const t of all) {
+    if (candidateMatchesWatchedMint(t, watched)) t.watchedMintMatch = true;
+  }
+
   const merged = mergeCandidates(all);
   const ranked = enrichAndRank(merged, cfg);
+  const pumpN = ranked.filter((t) => t.pumpCallout).length;
   notes.push(
-    `Merged=${merged.length} ranked by confluence (minSources=${cfg.minConfluenceSources}, preferGraduated=${cfg.preferGraduated})`
+    `Merged=${merged.length} ranked (minSources=${cfg.minConfluenceSources}, preferGraduated=${cfg.preferGraduated}, preferPump=${cfg.preferPumpCallouts}, pumpCallouts=${pumpN})`
   );
   return { tokens: ranked, notes };
 }
@@ -185,8 +215,11 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       fr.reasons.push(`confluence sources < min ${cfg.minConfluenceSources}`);
       fr.pass = false;
     }
-    const tw = await checkTwitterSignal(token);
+    const watchedNow = resolveWatchedMints(cfg);
+    if (candidateMatchesWatchedMint(token, watchedNow)) token.watchedMintMatch = true;
+    const tw = await checkTwitterSignal(token, { watchedMints: watchedNow });
     token.twitterTrending = tw.trending;
+    if (tw.watchedMintMatch) token.watchedMintMatch = true;
     // Re-score lightly after twitter (optional bump already in scoreConfluence)
     let jupiterOk: boolean | undefined;
     if (!tw.trending) {
@@ -256,7 +289,10 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
 
   const safety = await checkTokenSafety(token.mint);
   const fr = applyFilters(token, cfg.filters, safety);
-  const tw = await checkTwitterSignal(token);
+  const watchedNow = resolveWatchedMints(cfg);
+  if (candidateMatchesWatchedMint(token, watchedNow)) token.watchedMintMatch = true;
+  const tw = await checkTwitterSignal(token, { watchedMints: watchedNow });
+  if (tw.watchedMintMatch) token.watchedMintMatch = true;
   if (!tw.trending) fr.reasons.push(`twitter: ${tw.detail}`), (fr.pass = false);
   if (!fr.pass) {
     console.log(chalk.red(`Blocked ${token.symbol}: ${fr.reasons.join("; ")}`));
@@ -406,9 +442,10 @@ export async function runLoop(opts: { once?: boolean } = {}): Promise<void> {
       await monitorPositions();
       const rows = await scanOnce();
       // High-confluence passes first (scanOnce already sorts by score)
-      const passes = rows
-        .filter((r) => r.filterPass)
-        .sort((a, b) => (b.confluenceScore ?? 0) - (a.confluenceScore ?? 0));
+      const passes = sortForTryEnter(
+        rows.filter((r) => r.filterPass),
+        cfg
+      );
       console.log(chalk.bold(`Candidates checked=${rows.length} pass=${passes.length}`));
       for (const r of passes.slice(0, 5)) {
         await tryEnter(r.token);

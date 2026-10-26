@@ -25,9 +25,14 @@ export interface FilterConfig {
 
 export interface TwitterConfig {
   enabled: boolean;
+  /** Buzz words and/or Solana mint (contract) addresses — mints match candidates exactly. */
   keywords: string[];
   minMentionsHeuristic: number;
   useMockWhenNoKey: boolean;
+  /** Transient: also watch open-position mints as search terms. */
+  autoWatchOpenMints: boolean;
+  /** Transient: also watch top hot-scan mints as search terms. */
+  autoWatchHotMints: boolean;
 }
 
 export interface AppConfig {
@@ -50,6 +55,8 @@ export interface AppConfig {
   maxVolumeToLiquidityRatio: number;
   /** Prefer graduated tokens over still-on-curve for Jupiter routes. */
   preferGraduated: boolean;
+  /** Rank Pump.fun-sourced callouts / launches ahead of dex/jup-only hits. */
+  preferPumpCallouts: boolean;
   jupiterApiKey?: string;
   xBearerToken?: string;
   heliusApiKey?: string;
@@ -108,11 +115,27 @@ export function loadConfig(): AppConfig {
     denylistMints: Array.isArray(file.filters?.denylistMints) ? [...file.filters!.denylistMints!] : [],
   };
 
+  const defaultKeywords = ["pump", "solana", "gem", "moon"];
+  const fileKeywords = Array.isArray(file.twitter?.keywords) ? [...file.twitter!.keywords!] : null;
+  const envKeywords = (process.env.TWITTER_KEYWORDS || process.env.SEARCH_KEYWORDS || "")
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Env appends/overrides when set; otherwise config.json / defaults
+  const keywords =
+    envKeywords.length > 0
+      ? Array.from(new Set([...(fileKeywords ?? defaultKeywords), ...envKeywords]))
+      : fileKeywords ?? defaultKeywords;
+
   const twitter: TwitterConfig = {
     enabled: file.twitter?.enabled ?? true,
-    keywords: file.twitter?.keywords ?? ["pump", "solana", "gem", "moon"],
+    keywords,
     minMentionsHeuristic: file.twitter?.minMentionsHeuristic ?? 3,
     useMockWhenNoKey: file.twitter?.useMockWhenNoKey ?? true,
+    autoWatchOpenMints:
+      file.twitter?.autoWatchOpenMints ?? bool(process.env.AUTO_WATCH_OPEN_MINTS, true),
+    autoWatchHotMints:
+      file.twitter?.autoWatchHotMints ?? bool(process.env.AUTO_WATCH_HOT_MINTS, false),
   };
 
   let buyAmountSol = num(process.env.BUY_AMOUNT_SOL, file.buyAmountSol ?? 0.05);
@@ -143,6 +166,7 @@ export function loadConfig(): AppConfig {
       file.maxVolumeToLiquidityRatio ?? 40
     ),
     preferGraduated: bool(process.env.PREFER_GRADUATED, file.preferGraduated ?? true),
+    preferPumpCallouts: bool(process.env.PREFER_PUMP_CALLOUTS, file.preferPumpCallouts ?? true),
     jupiterApiKey: process.env.JUPITER_API_KEY || undefined,
     xBearerToken: process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN || undefined,
     heliusApiKey: process.env.HELIUS_API_KEY || undefined,

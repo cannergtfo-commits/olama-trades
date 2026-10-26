@@ -116,6 +116,18 @@ export function scoreConfluence(token: CandidateToken, cfg: AppConfig): number {
   // Twitter optional bump when already computed onto token
   if (token.twitterTrending === true) score += 5;
 
+  // Watched mint keyword (contract address) exact match
+  if (token.watchedMintMatch === true) score += 12;
+
+  // Pump.fun callout / launch priority (prefer over dex/jup-only)
+  if (cfg.preferPumpCallouts && tags.includes("pump")) {
+    score += 14;
+    // Extra nudge for fresh bonding callouts (new launches)
+    if (token.bondingStatus === "bonding" && (token.pairAgeMinutes ?? 999) < 180) {
+      score += 4;
+    }
+  }
+
   return Math.max(0, Math.min(100, Math.round(score * 10) / 10));
 }
 
@@ -157,6 +169,8 @@ export function mergeCandidates(tokens: CandidateToken[]): CandidateToken[] {
       name: t.name || prev.name,
       pairAddress: t.pairAddress || prev.pairAddress,
       url: t.url || prev.url,
+      watchedMintMatch: Boolean(prev.watchedMintMatch || t.watchedMintMatch),
+      twitterTrending: Boolean(prev.twitterTrending || t.twitterTrending) || undefined,
     };
     map.set(t.mint, richer);
   }
@@ -189,17 +203,29 @@ export function enrichAndRank(tokens: CandidateToken[], cfg: AppConfig): Candida
   const out = tokens.map((t) => {
     const ratio = volumeToLiquidityRatio(t);
     const liquidityRisk = classifyLiquidityRisk(ratio, cfg.maxVolumeToLiquidityRatio);
-    const tagged = { ...t, volumeToLiquidityRatio: ratio, liquidityRisk };
+    const tags = sourceTags(t);
+    const tagged = {
+      ...t,
+      volumeToLiquidityRatio: ratio,
+      liquidityRisk,
+      pumpCallout: tags.includes("pump"),
+    };
     const confluenceScore = scoreConfluence(tagged, cfg);
     return {
       ...tagged,
       confluenceScore,
       momentumHint: momentumHint(tagged),
-      sourceTagList: sourceTags(tagged),
+      sourceTagList: tags,
     };
   });
 
   out.sort((a, b) => {
+    // Hard preference: Pump.fun callouts ahead of dex/jup-only when enabled
+    if (cfg.preferPumpCallouts) {
+      const pa = a.pumpCallout ? 1 : 0;
+      const pb = b.pumpCallout ? 1 : 0;
+      if (pb !== pa) return pb - pa;
+    }
     const ca = a.confluenceScore ?? 0;
     const cb = b.confluenceScore ?? 0;
     if (cb !== ca) return cb - ca;
@@ -224,4 +250,22 @@ export function liquidityRiskNote(token: CandidateToken, maxRatio: number): stri
   if (risk === "ok") return undefined;
   const rLabel = Number.isFinite(ratio) ? `${ratio.toFixed(1)}x` : "inf";
   return `liqRisk=${risk} vol/liq=${rLabel} (soft; maxRatio=${maxRatio})`;
+}
+
+/** Order pass rows for tryEnter: Pump.fun callouts first, then confluence. */
+export function sortForTryEnter<T extends { token: CandidateToken; confluenceScore?: number }>(
+  rows: T[],
+  cfg: AppConfig
+): T[] {
+  return [...rows].sort((a, b) => {
+    if (cfg.preferPumpCallouts) {
+      const pa = a.token.pumpCallout || sourceTags(a.token).includes("pump") ? 1 : 0;
+      const pb = b.token.pumpCallout || sourceTags(b.token).includes("pump") ? 1 : 0;
+      if (pb !== pa) return pb - pa;
+    }
+    const ca = a.confluenceScore ?? a.token.confluenceScore ?? 0;
+    const cb = b.confluenceScore ?? b.token.confluenceScore ?? 0;
+    if (cb !== ca) return cb - ca;
+    return (b.token.volumeSpikeRatio || 0) - (a.token.volumeSpikeRatio || 0);
+  });
 }

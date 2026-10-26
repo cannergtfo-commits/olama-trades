@@ -145,6 +145,8 @@ Before `tryEnter`, candidates are merged across sources and scored:
 | Bonding / graduated | Prefer graduated for Jupiter routes; on-curve without route is blocked |
 | Organic Jupiter | Free `lite-api.jup.ag/tokens/v2/toporganicscore/5m` + `/recent` (no paid key) |
 | Light momentum | Approx RSI-ish hint from TF price changes — skipped gracefully if data missing |
+| Pump.fun callouts | Prefer pump-tagged launches ahead of dex/jup-only (`preferPumpCallouts`) |
+| Mint keywords | Exact mint match from `twitter.keywords` / `TWITTER_KEYWORDS` boosts score + social pass |
 
 ### Config knobs (defaults match current live behavior)
 
@@ -153,10 +155,36 @@ Before `tryEnter`, candidates are merged across sources and scored:
 | `minConfluenceSources` | `1` | Set `2` to require multi-platform hits (may starve thin APIs) |
 | `maxVolumeToLiquidityRatio` | `40` | Soft risk threshold for vol/liq |
 | `preferGraduated` | `true` | Downrank / soft-block lone bonding-curve tokens |
+| `preferPumpCallouts` | `true` | Rank Pump.fun sources first for tryEnter |
 
-Env aliases: `MIN_CONFLUENCE_SOURCES`, `MAX_VOLUME_TO_LIQUIDITY_RATIO`, `PREFER_GRADUATED`.
+Env aliases: `MIN_CONFLUENCE_SOURCES`, `MAX_VOLUME_TO_LIQUIDITY_RATIO`, `PREFER_GRADUATED`, `PREFER_PUMP_CALLOUTS`, `TWITTER_KEYWORDS`.
 
 **API limits:** Pump.fun frontend often Cloudflare-blocks datacenter IPs (DexScreener proxy used). Jupiter portal-only Organic UI extras beyond lite-api are skipped. True OHLCV RSI needs a chart API — bot uses TF price-change proxies instead.
+
+
+## Mint keywords (contract addresses)
+
+`twitter.keywords` (and env `TWITTER_KEYWORDS` / `SEARCH_KEYWORDS`) accept **buzz words and Solana mint addresses** side by side.
+
+| Form | Behavior |
+|------|----------|
+| Word (`pump`, `gem`) | Matches symbol/name substring (heuristic) and X cashtag search |
+| Mint (base58, 32–44 chars) | Exact case-insensitive match on candidate mint; boosts confluence + treats as Twitter/watchlist pass |
+| `AUTO_WATCH_OPEN_MINTS=true` | Transiently watch open-position mints |
+| `AUTO_WATCH_HOT_MINTS=false` | Optionally watch top hot-scan mints |
+
+```bash
+# .env — append a contract you want watched
+TWITTER_KEYWORDS=pump,solana,gem,moon,YourBase58MintAddressHere
+
+# or config.json → twitter.keywords array
+```
+
+Watched mints are also fetched via DexScreener `tokens/{mint}` during each scan.
+
+## Pump.fun callout priority
+
+When `preferPumpCallouts` / `PREFER_PUMP_CALLOUTS=true` (default), candidates tagged with a **Pump.fun** source family rank **ahead** of DexScreener/Jupiter-only hits for `tryEnter` ordering, with an extra confluence score boost (stronger for fresh bonding launches).
 
 ## Strategy defaults
 
@@ -177,7 +205,8 @@ src/security-checks.ts    holders + mint/freeze
 src/scanners/*            dexscreener, pumpfun, jupiter (organic)
 src/confluence.ts         cross-source score + liq risk
 docs/solana-skill.md      analysis playbook copy
-src/signals/twitter.ts    X API, optional Grok, or heuristic
+src/keywords.ts           buzz words + mint address watch list
+src/signals/twitter.ts    X API, mint keywords, Grok, or heuristic
 src/swap.ts / strategy.ts Jupiter + TP/SL loop
 src/ui/tui.ts web.ts      dashboards + chat
 public/                   web SPA + mascot.jpg

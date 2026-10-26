@@ -161,6 +161,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+
+/** Look up specific Solana mints (e.g. watched keyword contract addresses). */
+export async function fetchTokensByMints(mints: string[]): Promise<CandidateToken[]> {
+  const out: CandidateToken[] = [];
+  const uniq = Array.from(new Set(mints.map((m) => m.trim()).filter(Boolean)));
+  for (const mint of uniq.slice(0, 12)) {
+    const pairs = await fetchJson<{ pairs?: DexPair[] }>(`${BASE}/latest/dex/tokens/${mint}`);
+    const best = pickBestSolPair(pairs?.pairs ?? [], "dexscreener-watched-mint");
+    if (best) {
+      best.watchedMintMatch = true;
+      out.push(best);
+    }
+    await sleep(200);
+  }
+  return dedupeByMint(out);
+}
+
 export async function getTokenPriceUsd(mint: string): Promise<number | null> {
   const data = await fetchJson<{ pairs?: DexPair[] }>(`${BASE}/latest/dex/tokens/${mint}`);
   const best = pickBestSolPair(data?.pairs ?? []);

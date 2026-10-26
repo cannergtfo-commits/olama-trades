@@ -29,11 +29,14 @@
       "moon"
     ],
     "minMentionsHeuristic": 3,
-    "useMockWhenNoKey": true
+    "useMockWhenNoKey": true,
+    "autoWatchOpenMints": true,
+    "autoWatchHotMints": false
   },
   "maxPortfolioBuyPct": 90,
   "minSolReserve": 0.01,
   "minConfluenceSources": 1,
   "maxVolumeToLiquidityRatio": 40,
-  "preferGraduated": true
+  "preferGraduated": true,
+  "preferPumpCallouts": true
 }

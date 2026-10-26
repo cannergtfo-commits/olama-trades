@@ -36,6 +36,10 @@ export interface CandidateToken {
   momentumHint?: string;
   sourceTagList?: Array<"pump" | "dex" | "jup">;
   twitterTrending?: boolean;
+  /** Candidate mint is on keyword watch list (exact match). */
+  watchedMintMatch?: boolean;
+  /** True when discovery includes a Pump.fun family source (callout / launch). */
+  pumpCallout?: boolean;
 }
 
 export interface FilterResult {
