@@ -121,7 +121,7 @@ API: `GET /api/chat` · `POST /api/chat` body `{ "text": "…" }` (also accepts 
 
 ## Experimental risk-on test (patterns / indicators)
 
-> **Intentional high-risk experiment.** Entry blockers (holder %, mint/freeze authority, bundler, volume/spike, liquidity floors, preferGraduated hard gates, confluence min sources, Twitter hard-fail) are **disabled**. The bot ranks and buys on **bullish candlestick / indicator setups** (`patterns.ts` + solana-skill) and still keeps portfolio caps: buy size / `maxPortfolioBuyPct=90` / `minSolReserve=0.01` / TP **+10%** / SL **−25%** / `maxOpenPositions`. Pump.fun callouts remain a **soft** priority. `DRY_RUN=false` only when you set it.
+> **Intentional high-risk experiment.** Entry blockers (holder %, mint/freeze authority, bundler, volume/spike, liquidity floors, preferGraduated hard gates, confluence min sources, Twitter hard-fail) are **disabled**. The bot ranks and buys on **bullish candlestick / indicator setups** (`patterns.ts` + solana-skill) and still keeps portfolio caps: buy size / `maxPortfolioBuyPct=90` / `minSolReserve=0.01` / TP **+5%** / SL **−75%** / `maxOpenPositions`. Pump.fun callouts remain a **soft** priority. `DRY_RUN=false` only when you set it.
 
 | Knob | Risk-on value | Meaning |
 |------|---------------|---------|
