@@ -1,11 +1,11 @@
 {
-  "name": "solana-terminal-bot",
+  "name": "olama-trades",
   "version": "1.0.0",
-  "description": "Experimental Solana terminal trading bot \u2014 DexScreener / Pump.fun / Jupiter scan with TP/SL and holder filters",
+  "description": "Solana terminal trading bot \u2014 Ollama/Qwen2.5-Coder 14B co-pilot variant of solana-terminal-bot",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
-    "solana-bot": "./dist/cli.js"
+    "olama-trades": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -14,7 +14,8 @@
     "setup": "node --import tsx src/setup.ts",
     "install:bot": "bash scripts/install.sh",
     "typecheck": "tsc --noEmit",
-    "audit": "npm audit --omit=dev"
+    "audit": "npm audit --omit=dev",
+    "init-wallet": "node --import tsx scripts/init-wallet.ts"
   },
   "engines": {
     "node": ">=20"
@@ -34,5 +35,5 @@
     "tsx": "4.19.3",
     "typescript": "5.8.2"
   },
-  "private": true
+  "private": false
 }

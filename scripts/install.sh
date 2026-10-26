@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot installer for solana-terminal-bot (macOS / Linux)
+# One-shot installer for olama-trades (macOS / Linux)
 # Assumptions: bash available; Node.js 20+ on PATH (or user follows printed hints);
 #              network for npm install; interactive TTY optional for API key prompts.
 set -euo pipefail
@@ -104,11 +104,12 @@ if [[ -t 0 ]]; then
   echo -e "${BOLD}Optional connections${NC} ${DIM}(Enter to skip any)${NC}"
   echo -e "${DIM}  Jupiter: https://portal.jup.ag/${NC}"
   echo -e "${DIM}  X/Twitter: https://developer.x.com/${NC}"
-  echo -e "${DIM}  xAI/Grok: https://console.x.ai/${NC}"
+  echo -e "${DIM}  Ollama: https://ollama.com/  (ollama pull qwen2.5-coder:14b)${NC}"
+  echo -e "${DIM}  xAI fallback (optional): https://console.x.ai/${NC}"
   prompt_secret "JUPITER_API_KEY" "Jupiter API key"
   prompt_secret "X_BEARER_TOKEN" "X/Twitter bearer token"
-  prompt_secret "XAI_API_KEY" "xAI / Grok API key"
   prompt_secret "HELIUS_API_KEY" "Helius API key (optional)"
+  prompt_secret "XAI_API_KEY" "xAI API key (optional fallback)"
   echo -n "  Custom RPC_URL (blank = keep): "
   rpc_val=""
   read -r rpc_val || rpc_val=""

@@ -128,7 +128,7 @@ a:hover { text-decoration: underline; }
 code { color: var(--cyan); }
 
 
-/* —— Layout + Techno chat sidebar —— */
+/* —— Layout + Olama chat sidebar —— */
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);

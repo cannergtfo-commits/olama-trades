@@ -305,7 +305,7 @@ program
  */
 program
   .command("dashboard")
-  .description("Terminal dashboard (TUI) — [b] BOT ON/OFF, [c] Techno chat, 10s refresh")
+  .description("Terminal dashboard (TUI) — [b] BOT ON/OFF, [c] Olama chat, 10s refresh")
   .action(async () => {
     try {
       const mod = await import("./ui/tui.js");
@@ -338,7 +338,7 @@ program
 
 program
   .command("web")
-  .description("Local web dashboard (Express) — BOT ON/OFF + Techno chat sidebar")
+  .description("Local web dashboard (Express) — BOT ON/OFF + Olama chat sidebar")
   .option("--no-open", "Do not spawn a browser window")
   .option("--port <n>", "Listen port", "8787")
   .action(async (opts: { open?: boolean; port?: string }) => {
@@ -359,7 +359,7 @@ program
 
 program
   .command("setup")
-  .description("Interactive connections wizard (RPC, Jupiter, X, xAI/Grok) — writes .env safely")
+  .description("Interactive connections wizard (Ollama, RPC, Jupiter, X) — writes .env safely")
   .action(async () => {
     try {
       const mod = await import("./setup.js");

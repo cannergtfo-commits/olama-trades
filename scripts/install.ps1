@@ -1,4 +1,4 @@
-# One-shot installer for solana-terminal-bot (Windows)
+# One-shot installer for olama-trades (Windows)
 # Assumptions: PowerShell 5+; Node.js 20+ on PATH; network for npm.
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -77,10 +77,11 @@ Write-Host ""
 Write-Host "Optional connections (Enter/blank to skip)" -ForegroundColor White
 Write-Host "  Jupiter: https://portal.jup.ag/" -ForegroundColor DarkGray
 Write-Host "  X/Twitter: https://developer.x.com/" -ForegroundColor DarkGray
-Write-Host "  xAI/Grok: https://console.x.ai/" -ForegroundColor DarkGray
+Write-Host "  Ollama: https://ollama.com/ (ollama pull qwen2.5-coder:14b)" -ForegroundColor DarkGray
+Write-Host "  xAI fallback (optional): https://console.x.ai/" -ForegroundColor DarkGray
 Prompt-Secret "JUPITER_API_KEY" "Jupiter API key"
 Prompt-Secret "X_BEARER_TOKEN" "X/Twitter bearer token"
-Prompt-Secret "XAI_API_KEY" "xAI / Grok API key"
+Prompt-Secret "XAI_API_KEY" "xAI API key (optional fallback)"
 Prompt-Secret "HELIUS_API_KEY" "Helius API key (optional)"
 $rpc = Read-Host "  Custom RPC_URL (blank = keep)"
 if (-not [string]::IsNullOrWhiteSpace($rpc)) {

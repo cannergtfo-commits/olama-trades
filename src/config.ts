@@ -79,6 +79,10 @@ export interface AppConfig {
   xBearerToken?: string;
   heliusApiKey?: string;
   xaiApiKey?: string;
+  /** Chat provider: ollama (default) | xai | auto */
+  chatProvider: "ollama" | "xai" | "auto";
+  ollamaBaseUrl: string;
+  ollamaModel: string;
   filters: FilterConfig;
   twitter: TwitterConfig;
 }
@@ -211,6 +215,16 @@ export function loadConfig(): AppConfig {
     xBearerToken: process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN || undefined,
     heliusApiKey: process.env.HELIUS_API_KEY || undefined,
     xaiApiKey: process.env.XAI_API_KEY || process.env.GROK_API_KEY || undefined,
+    chatProvider: ((): "ollama" | "xai" | "auto" => {
+      const raw = (process.env.CHAT_PROVIDER || "ollama").trim().toLowerCase();
+      if (raw === "xai" || raw === "auto" || raw === "ollama") return raw;
+      return "ollama";
+    })(),
+    ollamaBaseUrl:
+      process.env.OLLAMA_BASE_URL?.trim() ||
+      process.env.OLLAMA_HOST?.trim() ||
+      "http://127.0.0.1:11434",
+    ollamaModel: process.env.OLLAMA_MODEL?.trim() || "qwen2.5-coder:14b",
     filters,
     twitter,
   };

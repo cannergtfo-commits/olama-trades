@@ -17,7 +17,7 @@ import {
 import { startEngine, stopEngine, forceTick, isEngineStarted } from "../engine.js";
 import { loadLastScan, saveLastScan } from "./last-scan.js";
 import { scanOnce } from "../strategy.js";
-import { getChatMessages, sendChat, chatHasXaiKey } from "../chat.js";
+import { getChatMessages, sendChat, chatHasXaiKey, chatLlmInfo } from "../chat.js";
 
 export const WEB_HOST = "127.0.0.1";
 export const WEB_PORT = 8787;
@@ -83,6 +83,8 @@ export async function runWeb(opts: { open?: boolean; port?: number } = {}): Prom
         res.write(`event: snapshot\ndata: ${payload}\n\n`);
         const chatPayload = JSON.stringify({
           hasXaiKey: chatHasXaiKey(),
+          hasLlm: true,
+          llm: chatLlmInfo(),
           messages: getChatMessages(80),
         });
         res.write(`event: chat\ndata: ${chatPayload}\n\n`);
@@ -153,10 +155,13 @@ export async function runWeb(opts: { open?: boolean; port?: number } = {}): Prom
   app.get("/api/chat", (req, res) => {
     const lim = Number(req.query.limit) || 80;
     const hasXaiKey = chatHasXaiKey();
+    const llm = chatLlmInfo();
     res.json({
       ok: true,
       hasXaiKey,
       xaiConfigured: hasXaiKey,
+      hasLlm: llm.provider !== "xai" || hasXaiKey,
+      llm,
       messages: getChatMessages(lim),
     });
   });
@@ -172,6 +177,9 @@ export async function runWeb(opts: { open?: boolean; port?: number } = {}): Prom
         detail: result.detail,
         hasXaiKey: result.hasXaiKey,
         xaiConfigured: result.hasXaiKey,
+        hasLlm: result.hasLlm,
+        llm: chatLlmInfo(),
+        provider: result.provider,
         user: result.user,
         assistant: result.assistant,
         messages: getChatMessages(80),

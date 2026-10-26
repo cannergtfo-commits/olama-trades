@@ -1,5 +1,6 @@
 /**
- * Techno chat — persist threads, optional xAI Grok replies, else operator bridge queue.
+ * Olama chat — persist threads, primary Ollama (qwen2.5-coder:14b) replies,
+ * optional xAI fallback, else operator bridge queue.
  * Never logs API keys or wallet secrets (public address only in model context).
  */
 import fs from "node:fs";
@@ -7,6 +8,19 @@ import path from "node:path";
 import { ROOT, loadConfig } from "./config.js";
 import { safeWalletInfo } from "./wallet.js";
 import { loadBotState } from "./bot-state.js";
+import {
+  chatCompletion,
+  getChatProvider,
+  getOllamaBaseUrl,
+  getOllamaModel,
+  isOllamaReachable,
+  llmConfiguredHint,
+  llmReady,
+  missingOllamaModelHint,
+  ollamaHasModel,
+  ollamaOfflineHint,
+  type LlmBackend,
+} from "./llm.js";
 
 export type ChatRole = "user" | "assistant" | "system";
 export type ChatStatus = "queued" | "replied" | "relay-pending" | "error";
@@ -17,7 +31,7 @@ export interface ChatMessage {
   text: string;
   at: string;
   status: ChatStatus;
-  source?: "xai" | "relay" | "local";
+  source?: "ollama" | "xai" | "relay" | "local";
 }
 
 export interface ChatLog {
@@ -27,8 +41,6 @@ export interface ChatLog {
 const CHAT_PATH = path.join(ROOT, "data", "chat-log.json");
 const OUTBOUND_PATH = path.join(ROOT, "data", "chat-outbound.json");
 const MAX_MESSAGES = 200;
-/** Documented current xAI chat model; override with XAI_MODEL. */
-const DEFAULT_MODEL = "grok-4.7";
 
 function ensureDataDir(): void {
   const dir = path.join(ROOT, "data");
@@ -56,7 +68,7 @@ function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Queue a user message for the operator bridge (no key / API failure). */
+/** Queue a user message for the operator bridge (no model / API failure). */
 function writeOutbound(msg: ChatMessage): void {
   ensureDataDir();
   let outbound: ChatMessage[] = [];
@@ -103,26 +115,20 @@ function publicBotContext(): string {
   ].join("\n");
 }
 
-async function callXai(userText: string, history: ChatMessage[]): Promise<string> {
-  const cfg = loadConfig();
-  const key = cfg.xaiApiKey;
-  if (!key) throw new Error("no XAI_API_KEY");
-
-  const model = process.env.XAI_MODEL?.trim() || DEFAULT_MODEL;
+async function callLlm(userText: string, history: ChatMessage[]): Promise<{ text: string; backend: LlmBackend }> {
   const recent = history
     .filter((m) => m.role === "user" || m.role === "assistant")
     .slice(-12)
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.text }));
 
-  const body = {
-    model,
+  const result = await chatCompletion({
     messages: [
       {
         role: "system",
         content:
-          "You are Techno, the Solana terminal trading bot co-pilot (Grok). " +
-          "Be concise and practical. Help with filters, scans, BOT ON/OFF, dry-run vs live, " +
-          "wallet funding (public address only), and TP/SL. " +
+          "You are Olama, the local co-pilot for Olama Trades (a Solana terminal trading bot). " +
+          "You run via Ollama (Qwen2.5-Coder). Be concise and practical. Help with filters, scans, " +
+          "BOT ON/OFF, dry-run vs live, wallet funding (public address only), and TP/SL. " +
           "Remind the user DRY_RUN=true is the safe default. " +
           "Never ask for or repeat private keys, seed phrases, or API keys.\n\n" +
           "Current bot context:\n" +
@@ -132,55 +138,61 @@ async function callXai(userText: string, history: ChatMessage[]): Promise<string
       { role: "user", content: userText },
     ],
     temperature: 0.7,
-    max_tokens: 800,
-  };
-
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
+    maxTokens: 800,
+    timeoutMs: 120_000,
   });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    // Never echo Authorization headers; truncate body only
-    throw new Error(`xAI HTTP ${res.status}${errText ? `: ${errText.slice(0, 160)}` : ""}`);
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const text = data.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error("empty xAI response");
-  return text;
+  return { text: result.text, backend: result.backend };
 }
 
 export function getChatMessages(limit = 80): ChatMessage[] {
   return readLog().messages.slice(-Math.max(1, limit));
 }
 
+/** @deprecated Prefer chatCanReply() — kept for older UI fields. */
 export function chatHasXaiKey(): boolean {
   return !!loadConfig().xaiApiKey;
+}
+
+/** Sync config snapshot for UI (does not probe Ollama). */
+export function chatLlmInfo() {
+  return llmConfiguredHint();
+}
+
+/** Async: true when Ollama is up (default) or xAI is available under auto/xai. */
+export async function chatCanReply(): Promise<boolean> {
+  return llmReady();
 }
 
 export interface SendChatResult {
   ok: boolean;
   user: ChatMessage;
   assistant?: ChatMessage;
-  mode: "xai" | "queued";
+  mode: "ollama" | "xai" | "queued";
   detail: string;
+  /** True when a local/cloud model path is configured to attempt replies. */
+  hasLlm: boolean;
+  /** Alias for older web UI — means "can attempt model reply". */
   hasXaiKey: boolean;
+  provider: string;
 }
 
-const NO_KEY_CTA =
-  "No XAI_API_KEY yet — message saved and queued for Techno (data/chat-outbound.json). " +
-  "For local Grok replies: run `npm run bot -- setup` (or add XAI_API_KEY=… to .env from https://console.x.ai/).";
+function noLlmCta(): string {
+  const model = getOllamaModel();
+  const base = getOllamaBaseUrl();
+  const provider = getChatProvider();
+  if (provider === "xai") {
+    return (
+      "No XAI_API_KEY yet — message saved and queued (data/chat-outbound.json). " +
+      "For cloud replies set XAI_API_KEY, or switch CHAT_PROVIDER=ollama and run Ollama locally."
+    );
+  }
+  return (
+    `Ollama not ready at ${base} (model ${model}) — message queued in data/chat-outbound.json. ` +
+    `Start Ollama, then run: ollama pull ${model}. Or set CHAT_PROVIDER=auto with XAI_API_KEY as fallback.`
+  );
+}
 
-/** Append user message; reply via xAI if keyed, else CTA + outbound queue. */
+/** Append user message; reply via Ollama (primary) / xAI fallback, else CTA + outbound queue. */
 export async function sendChat(text: string): Promise<SendChatResult> {
   const cleaned = (text || "").trim().slice(0, 4000);
   if (!cleaned) throw new Error("message is empty");
@@ -196,9 +208,26 @@ export async function sendChat(text: string): Promise<SendChatResult> {
   log.messages.push(userMsg);
   writeLog(log);
 
-  if (chatHasXaiKey()) {
+  const provider = getChatProvider();
+  const ready = await chatCanReply();
+  const hint = llmConfiguredHint();
+
+  if (ready) {
     try {
-      const reply = await callXai(cleaned, log.messages.slice(0, -1));
+      // Friendlier Ollama errors when provider is ollama/auto
+      if (provider !== "xai") {
+        const up = await isOllamaReachable();
+        if (up) {
+          const has = await ollamaHasModel();
+          if (!has && provider === "ollama") {
+            throw new Error(missingOllamaModelHint());
+          }
+        } else if (provider === "ollama") {
+          throw new Error(ollamaOfflineHint());
+        }
+      }
+
+      const { text: reply, backend } = await callLlm(cleaned, log.messages.slice(0, -1));
       userMsg.status = "replied";
       const assistant: ChatMessage = {
         id: uid(),
@@ -206,7 +235,7 @@ export async function sendChat(text: string): Promise<SendChatResult> {
         text: reply,
         at: new Date().toISOString(),
         status: "replied",
-        source: "xai",
+        source: backend === "ollama" ? "ollama" : "xai",
       };
       log.messages[log.messages.length - 1] = userMsg;
       log.messages.push(assistant);
@@ -215,9 +244,14 @@ export async function sendChat(text: string): Promise<SendChatResult> {
         ok: true,
         user: userMsg,
         assistant,
-        mode: "xai",
-        detail: "Techno replied via xAI",
+        mode: backend === "ollama" ? "ollama" : "xai",
+        detail:
+          backend === "ollama"
+            ? `Olama replied via Ollama (${getOllamaModel()})`
+            : "Olama replied via xAI fallback",
+        hasLlm: true,
         hasXaiKey: true,
+        provider,
       };
     } catch (e) {
       userMsg.status = "relay-pending";
@@ -227,8 +261,8 @@ export async function sendChat(text: string): Promise<SendChatResult> {
         id: uid(),
         role: "assistant",
         text:
-          `xAI call failed (${(e as Error).message}). Message queued in data/chat-outbound.json for Techno. ` +
-          "Check XAI_API_KEY / network, or wait for operator relay.",
+          `LLM call failed (${(e as Error).message}). Message queued in data/chat-outbound.json. ` +
+          `Check Ollama (${hint.ollamaBase}, model ${hint.ollamaModel}) or wait for operator relay.`,
         at: new Date().toISOString(),
         status: "error",
         source: "local",
@@ -240,8 +274,10 @@ export async function sendChat(text: string): Promise<SendChatResult> {
         user: userMsg,
         assistant,
         mode: "queued",
-        detail: "xAI error — queued for relay",
+        detail: "LLM error — queued for relay",
+        hasLlm: true,
         hasXaiKey: true,
+        provider,
       };
     }
   }
@@ -252,7 +288,7 @@ export async function sendChat(text: string): Promise<SendChatResult> {
   const assistant: ChatMessage = {
     id: uid(),
     role: "assistant",
-    text: NO_KEY_CTA,
+    text: noLlmCta(),
     at: new Date().toISOString(),
     status: "relay-pending",
     source: "local",
@@ -264,7 +300,9 @@ export async function sendChat(text: string): Promise<SendChatResult> {
     user: userMsg,
     assistant,
     mode: "queued",
-    detail: "Queued — add XAI_API_KEY for Grok replies",
+    detail: "Queued — start Ollama for local Qwen replies",
+    hasLlm: false,
     hasXaiKey: false,
+    provider,
   };
 }

@@ -13,7 +13,7 @@ export interface TwitterSignal {
   symbol: string;
   score: number;
   trending: boolean;
-  source: "x-api" | "xai-grok" | "heuristic-mock" | "watched-mint" | "disabled";
+  source: "x-api" | "ollama" | "xai-grok" | "heuristic-mock" | "watched-mint" | "disabled";
   detail: string;
   /** True when candidate mint matches a configured/transient mint keyword. */
   watchedMintMatch?: boolean;
@@ -24,8 +24,9 @@ export interface TwitterSignal {
  * Priority:
  *  0. Watched mint keyword exact match → strong pass / boost
  *  1. X_BEARER_TOKEN → X recent search (cashtag + mint keywords)
- *  2. XAI_API_KEY → light Grok judgment on volume/spike context
- *  3. Heuristic mock (volume spike + buzz keywords) when useMockWhenNoKey
+ *  2. Ollama (qwen2.5-coder:14b) → light local judgment on volume/spike context
+ *  3. XAI_API_KEY → optional cloud fallback when CHAT_PROVIDER=auto|xai
+ *  4. Heuristic mock (volume spike + buzz keywords) when useMockWhenNoKey
  * Graceful degrade without keys — scanning still works.
  */
 export async function checkTwitterSignal(
@@ -94,56 +95,43 @@ export async function checkTwitterSignal(
     }
   }
 
-  if (cfg.xaiApiKey) {
-    try {
-      const prompt = `Solana memecoin quick trend check. Symbol=${token.symbol} name=${token.name} mint=${token.mint} volumeSpike=${token.volumeSpikeRatio.toFixed(2)}x liquidityUsd=${Math.round(token.liquidityUsd)} vol24hUsd=${Math.round(token.volume24hUsd)}. Reply ONLY JSON: {"trending":true|false,"score":0-10,"reason":"short"}.`;
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${cfg.xaiApiKey}`,
-          "Content-Type": "application/json",
+  // Local Ollama (primary) or optional xAI — shared llm client
+  try {
+    const { chatCompletion } = await import("../llm.js");
+    const prompt = `Solana memecoin quick trend check. Symbol=${token.symbol} name=${token.name} mint=${token.mint} volumeSpike=${token.volumeSpikeRatio.toFixed(2)}x liquidityUsd=${Math.round(token.liquidityUsd)} vol24hUsd=${Math.round(token.volume24hUsd)}. Reply ONLY JSON: {"trending":true|false,"score":0-10,"reason":"short"}.`;
+    const result = await chatCompletion({
+      messages: [
+        {
+          role: "system",
+          content: "You score speculative crypto social buzz. Be skeptical. Output JSON only. Never ask for keys.",
         },
-        body: JSON.stringify({
-          model: "grok-2-latest",
-          messages: [
-            {
-              role: "system",
-              content: "You score speculative crypto social buzz. Be skeptical. Output JSON only.",
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.2,
-          max_tokens: 120,
-        }),
-        signal: AbortSignal.timeout(12_000),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-        const raw = data.choices?.[0]?.message?.content ?? "";
-        const match = raw.match(/\{[\s\S]*\}/);
-        if (match) {
-          const parsed = JSON.parse(match[0]) as {
-            trending?: boolean;
-            score?: number;
-            reason?: string;
-          };
-          const score = Number(parsed.score) || 0;
-          return {
-            mint: token.mint,
-            symbol: token.symbol,
-            score,
-            trending: !!parsed.trending,
-            source: "xai-grok",
-            detail: parsed.reason || `Grok score ${score}`,
-            watchedMintMatch: false,
-          };
-        }
-      }
-    } catch {
-      /* fall through to heuristic */
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+      maxTokens: 120,
+      timeoutMs: 30_000,
+    });
+    const match = result.text.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]) as {
+        trending?: boolean;
+        score?: number;
+        reason?: string;
+      };
+      const score = Number(parsed.score) || 0;
+      const src = result.backend === "ollama" ? "ollama" as const : "xai-grok" as const;
+      return {
+        mint: token.mint,
+        symbol: token.symbol,
+        score,
+        trending: !!parsed.trending,
+        source: src,
+        detail: parsed.reason || `${result.backend} score ${score}`,
+        watchedMintMatch: false,
+      };
     }
+  } catch {
+    /* fall through to heuristic */
   }
 
   // No API key (or upstream failed): heuristic — volume spike + buzz word (not mint)

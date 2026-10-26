@@ -277,7 +277,7 @@ setInterval(() => {
   fetchSnapshot().then(render).catch(() => {});
 }, 10_000);
 
-/* —— Techno chat —— */
+/* —— Olama chat —— */
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -292,28 +292,30 @@ function renderChat(payload) {
   const hint = $("chat-hint");
   if (!log) return;
 
-  const hasKey = !!(payload.hasXaiKey || payload.xaiConfigured);
+  const llm = payload.llm || {};
+  const hasKey = !!(payload.hasLlm || payload.hasXaiKey || payload.xaiConfigured || llm.provider === "ollama" || llm.provider === "auto");
   if (status) {
+    const model = llm.ollamaModel || "qwen2.5-coder:14b";
     status.textContent = hasKey
-      ? "Grok replies ON (XAI_API_KEY)"
-      : "No XAI_API_KEY — messages queued for Techno";
+      ? `Olama · Ollama (${model})`
+      : "Ollama offline — start ollama + pull model";
     status.className = "chat-status " + (hasKey ? "ok" : "warn");
   }
   if (hint) {
     hint.innerHTML = hasKey
-      ? "Talk while the dashboard runs. Secrets stay out of chat context."
-      : 'Add a key: <code>npm run bot -- setup</code> or set <code>XAI_API_KEY</code> in <code>.env</code> (<a href="https://console.x.ai/" target="_blank" rel="noopener">console.x.ai</a>). Queues to <code>data/chat-outbound.json</code>.';
+      ? "Talk while the dashboard runs. Secrets stay out of chat context. Local Qwen via Ollama."
+      : 'Start Ollama and run <code>ollama pull qwen2.5-coder:14b</code>. Queues to <code>data/chat-outbound.json</code> until reachable.';
   }
 
   const msgs = payload.messages || [];
   if (!msgs.length) {
-    log.innerHTML = `<p class="chat-empty">Say hi — Techno stays with you while the bot runs.</p>`;
+    log.innerHTML = `<p class="chat-empty">Say hi — Olama stays with you while the bot runs.</p>`;
     return;
   }
   log.innerHTML = msgs
     .map((m) => {
       const role = m.role === "user" ? "user" : "assistant";
-      const who = role === "user" ? "you" : "techno";
+      const who = role === "user" ? "you" : "olama";
       const st =
         m.status === "relay-pending"
           ? ` <span class="status">queued</span>`
@@ -356,7 +358,7 @@ if (chatForm) {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       input.value = "";
       renderChat(data);
-      toast(data.detail || (data.mode === "xai" ? "Techno replied" : "Queued for Techno"));
+      toast(data.detail || (data.mode === "ollama" || data.mode === "xai" ? "Olama replied" : "Queued for Olama"));
     } catch (e) {
       toast(e.message, true);
     } finally {

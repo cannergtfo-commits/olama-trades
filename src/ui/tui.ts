@@ -1,5 +1,5 @@
 /**
- * Terminal dashboard — chalk redraw every 10s, keybinds for bot arm/disarm + Techno chat.
+ * Terminal dashboard — chalk redraw every 10s, keybinds for bot arm/disarm + Olama chat.
  * Does not print wallet secrets.
  */
 import chalk from "chalk";
@@ -16,6 +16,7 @@ import {
   getChatMessages,
   sendChat,
   chatHasXaiKey,
+  chatLlmInfo,
   type ChatMessage,
 } from "../chat.js";
 
@@ -106,19 +107,23 @@ function renderChatPanel(
   draft: string,
   sending: boolean
 ): string {
-  const hasKey = chatHasXaiKey();
+  const llm = chatLlmInfo();
+  const hasKey = llm.provider !== "xai" || chatHasXaiKey();
   const title = focused
-    ? "TECHNO CHAT  [FOCUSED — Enter send · Esc leave]"
-    : "TECHNO CHAT  press [c] to focus";
-  const mode = hasKey ? chalk.green("Grok ON") : chalk.yellow("no XAI_API_KEY → setup");
+    ? "OLAMA CHAT  [FOCUSED — Enter send · Esc leave]"
+    : "OLAMA CHAT  press [c] to focus";
+  const mode =
+    llm.provider === "xai"
+      ? (chatHasXaiKey() ? chalk.green("xAI ON") : chalk.yellow("no XAI_API_KEY → setup"))
+      : chalk.green(`Ollama · ${llm.ollamaModel}`);
   const rows: string[] = [`mode ${stripAnsi(mode)}  ·  ${hasKey ? "live replies" : "queue + CTA"}`];
 
   const recent = messages.slice(-6);
   if (!recent.length) {
-    rows.push(chalk.dim("say hi — Techno stays with you while the bot runs"));
+    rows.push(chalk.dim("say hi — Olama stays with you while the bot runs"));
   } else {
     for (const m of recent) {
-      const who = m.role === "user" ? chalk.cyan("you") : chalk.magenta("techno");
+      const who = m.role === "user" ? chalk.cyan("you") : chalk.magenta("olama");
       const prefix = `${who}> `;
       const lines = wrapLine(m.text, 56);
       rows.push(`${prefix}${lines[0]}`);
@@ -254,7 +259,7 @@ function render(
   );
   lines.push(
     chalk.dim(
-      "  Tip: chat needs XAI_API_KEY for Grok (`npm run bot -- setup`). Web: npm run bot -- web"
+      "  Tip: chat uses Ollama (`ollama pull qwen2.5-coder:14b`). Web: npm run bot -- web"
     )
   );
   lines.push("");
@@ -270,7 +275,7 @@ export async function runTui(): Promise<void> {
   }
 
   startEngine();
-  let msg = chalk.yellow("Dashboard live — [b] arm bot · [c] chat with Techno");
+  let msg = chalk.yellow("Dashboard live — [b] arm bot · [c] chat with Olama");
   let scanning = false;
   let refreshing = false;
   let timer: NodeJS.Timeout | null = null;
@@ -337,7 +342,7 @@ export async function runTui(): Promise<void> {
         const text = chatDraft.trim();
         chatDraft = "";
         chatSending = true;
-        msg = chalk.dim("sending to Techno…");
+        msg = chalk.dim("sending to Olama…");
         void (async () => {
           try {
             await paint();

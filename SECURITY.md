@@ -1,4 +1,4 @@
-# Security review — solana-terminal-bot
+# Security review — olama-trades
 
 **Scope:** wallet handling, swap path, filters, dependencies, residual market/protocol risk.  
 **Date:** 2026-10-26 (America/Los_Angeles).  
@@ -104,6 +104,6 @@ Treat high/critical findings as blockers before live trading.
 
 Dashboards expose an **armed** flag (`data/bot-state.json`). When OFF, the engine skips scan/buy/exit. This is not an auth boundary — anyone with shell access can arm the bot. Protect the host and `.wallet/` as before.
 
-## Techno chat
+## Olama chat
 
-Dashboard chat (`src/chat.ts`) stores messages in `data/chat-log.json` (gitignored). With `XAI_API_KEY`, replies call xAI locally. Without a key, messages queue in `data/chat-outbound.json` for operator/Techno relay. Chat never requests or logs private keys.
+Dashboard chat (`src/chat.ts` + `src/llm.ts`) stores messages in `data/chat-log.json` (gitignored). Default provider is local **Ollama** (`OLLAMA_MODEL=qwen2.5-coder:14b`). Optional xAI fallback when `CHAT_PROVIDER=auto|xai`. If Ollama is unreachable, messages queue in `data/chat-outbound.json`. Chat never requests or logs private keys.
