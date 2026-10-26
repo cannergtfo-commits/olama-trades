@@ -17,6 +17,12 @@ export interface LastScanRowView {
   volume24hUsd: number;
   source: string;
   twitter?: string;
+  confluenceScore?: number;
+  bondingStatus?: string;
+  volumeSummary?: string;
+  liquidityRiskNote?: string;
+  sourceTags?: string[];
+  momentumHint?: string;
 }
 
 export interface LastScanCache {
@@ -50,6 +56,12 @@ export function saveLastScan(rows: ScanReportRow[], notes?: string[]): LastScanC
       volume24hUsd: r.token.volume24hUsd,
       source: r.token.source,
       twitter: r.twitter,
+      confluenceScore: r.confluenceScore ?? r.token.confluenceScore,
+      bondingStatus: r.bondingStatus ?? r.token.bondingStatus,
+      volumeSummary: r.volumeSummary,
+      liquidityRiskNote: r.liquidityRiskNote,
+      sourceTags: r.sourceTags ?? r.token.sourceTagList,
+      momentumHint: r.token.momentumHint,
     })),
   };
   const dir = path.dirname(PATH);

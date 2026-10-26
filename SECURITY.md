@@ -14,7 +14,7 @@
 | Oversized buys | `maxBuyAmountSol` cap; slippage clamped 10–500 bps | Cap is config — user can raise it |
 | Malicious aggregator / fake Jupiter | Hard-coded `https://api.jup.ag/swap/v2` only | DNS/TLS compromise of host still possible |
 | Remote code execution | No `eval` of API payloads; txs deserialized via `@solana/web3.js` | Supply-chain compromise of npm deps |
-| Rug / honeypot tokens | Filters: top holder %, top10 %, liquidity, age, mint/freeze revoked, denylist, Jupiter route check | Transfer hooks, blacklists, LP pulls after buy still possible |
+| Rug / honeypot tokens | Filters: top holder %, top10 %, **bundler/insider %** (`maxBundlerPercent`), liquidity, age, mint/freeze revoked, denylist, Jupiter route check | Transfer hooks, blacklists, LP pulls after buy still possible |
 | RPC spoofing / poisoned accounts | Uses configured `RPC_URL`; recommend reputable provider | Public RPC can throttle or behave oddly; not authenticated |
 | Pump.fun honeypots / sniper games | Conservative filters + dry-run default | Memecoins are adversarial by nature |
 
@@ -30,6 +30,7 @@
 - [x] Official Jupiter Swap API v2 order → sign `VersionedTransaction` → execute (RPC send fallback only after local sign)
 - [x] `DRY_RUN=true` by default — swaps and withdraws simulate
 - [x] Holder concentration via `getTokenLargestAccounts` + mint parse for authorities
+- [x] Bundler/insider % via RugCheck report (optional Solana Tracker); **fail-closed** when unknown
 - [x] `npm audit` run at build time (see below / re-run locally)
 
 ## Swap signing path (review)
@@ -62,6 +63,17 @@ npm audit --omit=dev
 ```
 
 Treat high/critical findings as blockers before live trading.
+
+
+## Bundler / insider concentration
+
+- Primary: free RugCheck `GET https://api.rugcheck.xyz/v1/tokens/{mint}/report`
+  - Prefer `sum(insiderNetworks[].currentHolding) / token.supply * 100`
+  - Else sum of `topHolders[].pct` where `insider===true`
+  - Else parse risk rows mentioning bundle/sniper `%`
+  - Else if `graphInsidersDetected===0` and no networks → **0%** (known clean)
+- Fallback: Solana Tracker `GET .../tokens/{mint}/bundlers` only when `SOLANA_TRACKER_API_KEY` is set; read `percentage`
+- Filter key: `maxBundlerPercent` (env `MAX_BUNDLER_PCT`, default **1**). Block when `bundlerPercent >= max` **or** when % cannot be determined (`bundler % unknown — blocked`).
 
 ## Operational recommendations
 

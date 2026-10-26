@@ -11,6 +11,8 @@ dotenv.config({ path: path.join(ROOT, ".env") });
 export interface FilterConfig {
   maxTopHolderPercent: number;
   maxTop10HolderPercent: number;
+  /** Block buys when bundler/insider concentration % >= this (fail-closed if unknown). */
+  maxBundlerPercent: number;
   minLiquidityUsd: number;
   minVolume24hUsd: number;
   minVolumeSpikeRatio: number;
@@ -32,12 +34,22 @@ export interface AppConfig {
   rpcUrl: string;
   buyAmountSol: number;
   maxBuyAmountSol: number;
+  /** Cap each buy as % of SOL balance (leave rest for fees). */
+  maxPortfolioBuyPct: number;
+  /** Absolute SOL to never spend (gas / rent). */
+  minSolReserve: number;
   takeProfitPct: number;
   stopLossPct: number;
   slippageBps: number;
   dryRun: boolean;
   scanIntervalMs: number;
   maxOpenPositions: number;
+  /** Min distinct source families (pump/dex/jup) before tryEnter. Default 1 keeps live bot fed. */
+  minConfluenceSources: number;
+  /** Soft vol24h/liquidity ratio flag (downrank / note; not a hard fail). */
+  maxVolumeToLiquidityRatio: number;
+  /** Prefer graduated tokens over still-on-curve for Jupiter routes. */
+  preferGraduated: boolean;
   jupiterApiKey?: string;
   xBearerToken?: string;
   heliusApiKey?: string;
@@ -81,6 +93,7 @@ export function loadConfig(): AppConfig {
   const filters: FilterConfig = {
     maxTopHolderPercent: file.filters?.maxTopHolderPercent ?? num(process.env.MAX_TOP_HOLDER_PCT, 20),
     maxTop10HolderPercent: file.filters?.maxTop10HolderPercent ?? num(process.env.MAX_TOP10_HOLDER_PCT, 50),
+    maxBundlerPercent: file.filters?.maxBundlerPercent ?? num(process.env.MAX_BUNDLER_PCT, 1),
     minLiquidityUsd: file.filters?.minLiquidityUsd ?? num(process.env.MIN_LIQUIDITY_USD, 10_000),
     minVolume24hUsd: file.filters?.minVolume24hUsd ?? num(process.env.MIN_VOLUME_24H_USD, 5_000),
     minVolumeSpikeRatio: file.filters?.minVolumeSpikeRatio ?? num(process.env.MIN_VOLUME_SPIKE_RATIO, 2),
@@ -104,6 +117,8 @@ export function loadConfig(): AppConfig {
 
   let buyAmountSol = num(process.env.BUY_AMOUNT_SOL, file.buyAmountSol ?? 0.05);
   const maxBuyAmountSol = num(process.env.MAX_BUY_AMOUNT_SOL, file.maxBuyAmountSol ?? 0.25);
+  const maxPortfolioBuyPct = num(process.env.MAX_PORTFOLIO_BUY_PCT, file.maxPortfolioBuyPct ?? 90);
+  const minSolReserve = num(process.env.MIN_SOL_RESERVE, file.minSolReserve ?? 0.01);
   if (buyAmountSol > maxBuyAmountSol) buyAmountSol = maxBuyAmountSol;
 
   let slippageBps = num(process.env.SLIPPAGE_BPS, file.slippageBps ?? 100);
@@ -114,12 +129,20 @@ export function loadConfig(): AppConfig {
     rpcUrl: process.env.RPC_URL || "https://api.mainnet-beta.solana.com",
     buyAmountSol,
     maxBuyAmountSol,
+    maxPortfolioBuyPct,
+    minSolReserve,
     takeProfitPct: num(process.env.TAKE_PROFIT_PCT, file.takeProfitPct ?? 10),
     stopLossPct: num(process.env.STOP_LOSS_PCT, file.stopLossPct ?? 25),
     slippageBps,
     dryRun: bool(process.env.DRY_RUN, file.dryRun ?? true),
     scanIntervalMs: num(process.env.SCAN_INTERVAL_MS, file.scanIntervalMs ?? 30_000),
     maxOpenPositions: num(process.env.MAX_OPEN_POSITIONS, file.maxOpenPositions ?? 3),
+    minConfluenceSources: num(process.env.MIN_CONFLUENCE_SOURCES, file.minConfluenceSources ?? 1),
+    maxVolumeToLiquidityRatio: num(
+      process.env.MAX_VOLUME_TO_LIQUIDITY_RATIO,
+      file.maxVolumeToLiquidityRatio ?? 40
+    ),
+    preferGraduated: bool(process.env.PREFER_GRADUATED, file.preferGraduated ?? true),
     jupiterApiKey: process.env.JUPITER_API_KEY || undefined,
     xBearerToken: process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN || undefined,
     heliusApiKey: process.env.HELIUS_API_KEY || undefined,
@@ -132,6 +155,7 @@ export function loadConfig(): AppConfig {
 const FILTER_ENV_MAP: Record<keyof Omit<FilterConfig, "denylistMints">, string> = {
   maxTopHolderPercent: "MAX_TOP_HOLDER_PCT",
   maxTop10HolderPercent: "MAX_TOP10_HOLDER_PCT",
+  maxBundlerPercent: "MAX_BUNDLER_PCT",
   minLiquidityUsd: "MIN_LIQUIDITY_USD",
   minVolume24hUsd: "MIN_VOLUME_24H_USD",
   minVolumeSpikeRatio: "MIN_VOLUME_SPIKE_RATIO",

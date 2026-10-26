@@ -222,7 +222,11 @@ function render(
       .slice(0, 6)
       .map((r) => {
         const tag = r.filterPass ? "PASS" : "BLOCK";
-        return `${tag} ${r.symbol.padEnd(8)} spike=${r.volumeSpikeRatio.toFixed(1)}x liq=$${Math.round(r.liquidityUsd)} ${r.source}`;
+        const conf = r.confluenceScore != null ? `c=${Number(r.confluenceScore).toFixed(0)}` : "c=?";
+        const bond = (r.bondingStatus || "?").slice(0, 4);
+        const tags = (r.sourceTags && r.sourceTags.length ? r.sourceTags.join("+") : r.source).slice(0, 12);
+        const risk = r.liquidityRiskNote ? " !liq" : "";
+        return `${tag} ${r.symbol.padEnd(7)} ${conf} ${bond} spike=${r.volumeSpikeRatio.toFixed(1)}x ${tags}${risk}`;
       })
       .join("\n");
     scanBody = `${head}\n${rows}`;

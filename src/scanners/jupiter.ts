@@ -1,6 +1,8 @@
 import { SOL_MINT, loadConfig } from "../config.js";
+import type { CandidateToken } from "../filters.js";
 
 const ORDER_BASE = "https://api.jup.ag/swap/v2";
+const LITE = "https://lite-api.jup.ag";
 
 export interface JupiterQuoteLite {
   mint: string;
@@ -105,4 +107,136 @@ export async function jupiterPriceUsd(mints: string[]): Promise<Record<string, n
   } catch {
     return {};
   }
+}
+
+interface JupTokenRow {
+  id?: string;
+  symbol?: string;
+  name?: string;
+  usdPrice?: number;
+  liquidity?: number;
+  mcap?: number;
+  organicScore?: number;
+  organicScoreLabel?: string;
+  launchpad?: string | null;
+  graduatedPool?: string | null;
+  graduatedAt?: string | null;
+  createdAt?: string;
+  stats5m?: { buyVolume?: number; sellVolume?: number; priceChange?: number };
+  stats1h?: { buyVolume?: number; sellVolume?: number; priceChange?: number };
+  stats6h?: { buyVolume?: number; sellVolume?: number; priceChange?: number };
+  stats24h?: { buyVolume?: number; sellVolume?: number; priceChange?: number };
+}
+
+function volSum(s?: { buyVolume?: number; sellVolume?: number }): number {
+  return Number(s?.buyVolume ?? 0) + Number(s?.sellVolume ?? 0);
+}
+
+function fromJupRow(row: JupTokenRow, source: string): CandidateToken | null {
+  const mint = row.id;
+  if (!mint || mint === SOL_MINT) return null;
+  // Skip majors / stables that organic endpoint surfaces
+  const sym = (row.symbol || "").toUpperCase();
+  if (["SOL", "USDC", "USDT", "WSOL", "JUP", "MSOL"].includes(sym)) return null;
+
+  const volume5mUsd = volSum(row.stats5m);
+  const volume1hUsd = volSum(row.stats1h);
+  const volume6hUsd = volSum(row.stats6h);
+  const volume24hUsd = volSum(row.stats24h);
+  const expectedHourly = volume24hUsd / 24;
+  const volumeSpikeRatio =
+    expectedHourly > 0 ? volume1hUsd / expectedHourly : volume1hUsd > 0 ? 10 : 0;
+
+  let bondingStatus: CandidateToken["bondingStatus"] = "unknown";
+  if (row.graduatedPool || row.graduatedAt) bondingStatus = "graduated";
+  else if (row.launchpad && String(row.launchpad).toLowerCase().includes("pump")) {
+    bondingStatus = "bonding";
+  }
+
+  const createdMs = row.createdAt ? Date.parse(row.createdAt) : NaN;
+  const pairAgeMinutes = Number.isFinite(createdMs)
+    ? Math.max(0, (Date.now() - createdMs) / 60_000)
+    : 999_999;
+
+  return {
+    mint,
+    symbol: row.symbol ?? "???",
+    name: row.name ?? "",
+    priceUsd: Number(row.usdPrice ?? 0),
+    liquidityUsd: Number(row.liquidity ?? 0),
+    volume24hUsd,
+    volume5mUsd,
+    volume1hUsd,
+    volume6hUsd,
+    volumeSpikeRatio,
+    pairAgeMinutes,
+    priceChange5m: row.stats5m?.priceChange,
+    priceChange1h: row.stats1h?.priceChange,
+    priceChange6h: row.stats6h?.priceChange,
+    priceChange24h: row.stats24h?.priceChange,
+    bondingStatus,
+    organicScore: Number(row.organicScore ?? 0) || undefined,
+    source,
+    sources: [source],
+  };
+}
+
+/**
+ * Free Jupiter discovery: organic score leaderboard + recent launches.
+ * Portal "Organic" UI filters are mirrored by lite-api toporganicscore (no paid key).
+ * Paid portal-only views are documented as skipped in README if unavailable.
+ */
+export async function scanJupiterOrganic(): Promise<{ tokens: CandidateToken[]; notes: string[] }> {
+  const notes: string[] = [];
+  const out: CandidateToken[] = [];
+
+  try {
+    const res = await fetch(`${LITE}/tokens/v2/toporganicscore/5m`, {
+      headers: jupHeaders(),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (res.ok) {
+      const rows = (await res.json()) as JupTokenRow[];
+      let n = 0;
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const c = fromJupRow(row, "jupiter-organic");
+        if (!c) continue;
+        // Prefer memecoin-ish: lower mcap / has launchpad or non-zero organic on small caps
+        if ((row.mcap ?? 0) > 500_000_000) continue;
+        out.push(c);
+        n++;
+        if (n >= 25) break;
+      }
+      notes.push(`Jupiter organic (lite-api toporganicscore/5m): ${n} candidates`);
+    } else {
+      notes.push(`Jupiter organic HTTP ${res.status} — skipped this cycle`);
+    }
+  } catch (e) {
+    notes.push(`Jupiter organic unreachable: ${(e as Error).message}`);
+  }
+
+  try {
+    const res = await fetch(`${LITE}/tokens/v2/recent`, {
+      headers: jupHeaders(),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (res.ok) {
+      const rows = (await res.json()) as JupTokenRow[];
+      let n = 0;
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const c = fromJupRow(row, "jupiter-recent");
+        if (!c) continue;
+        out.push(c);
+        n++;
+        if (n >= 20) break;
+      }
+      notes.push(`Jupiter recent (lite-api): ${n} candidates`);
+    } else {
+      notes.push(`Jupiter recent HTTP ${res.status} — skipped`);
+    }
+  } catch (e) {
+    notes.push(`Jupiter recent unreachable: ${(e as Error).message}`);
+  }
+
+  return { tokens: out, notes };
 }

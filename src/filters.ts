@@ -10,9 +10,32 @@ export interface CandidateToken {
   volume24hUsd: number;
   volumeSpikeRatio: number;
   pairAgeMinutes: number;
+  /** Primary / display source string (may be joined after merge). */
   source: string;
+  /** All raw discovery sources for this mint (confluence). */
+  sources?: string[];
   pairAddress?: string;
   url?: string;
+  /** Multi-timeframe volume (USD) when APIs provide them. */
+  volume5mUsd?: number;
+  volume1hUsd?: number;
+  volume6hUsd?: number;
+  /** Multi-timeframe price change % when APIs provide them. */
+  priceChange5m?: number;
+  priceChange1h?: number;
+  priceChange6h?: number;
+  priceChange24h?: number;
+  /** Bonding curve vs graduated (Pump.fun / Jupiter launchpad). */
+  bondingStatus?: "bonding" | "graduated" | "unknown";
+  /** Jupiter organic score 0–100 when available. */
+  organicScore?: number;
+  /** Filled by confluence enrich. */
+  volumeToLiquidityRatio?: number;
+  liquidityRisk?: "ok" | "elevated" | "high";
+  confluenceScore?: number;
+  momentumHint?: string;
+  sourceTagList?: Array<"pump" | "dex" | "jup">;
+  twitterTrending?: boolean;
 }
 
 export interface FilterResult {
@@ -23,6 +46,7 @@ export interface FilterResult {
 const FILTER_KEYS: (keyof FilterConfig)[] = [
   "maxTopHolderPercent",
   "maxTop10HolderPercent",
+  "maxBundlerPercent",
   "minLiquidityUsd",
   "minVolume24hUsd",
   "minVolumeSpikeRatio",
@@ -78,6 +102,16 @@ export function applyFilters(
         `top10 holders ${safety.top10HolderPercent.toFixed(1)}% > max ${filters.maxTop10HolderPercent}%`
       );
     }
+    // Bundler / insider concentration — fail closed when % cannot be determined
+    if (filters.maxBundlerPercent >= 0) {
+      if (safety.bundlerPercent === undefined || !Number.isFinite(safety.bundlerPercent)) {
+        reasons.push("bundler % unknown — blocked");
+      } else if (safety.bundlerPercent >= filters.maxBundlerPercent) {
+        reasons.push(
+          `bundler ${safety.bundlerPercent.toFixed(2)}% >= max ${filters.maxBundlerPercent}%`
+        );
+      }
+    }
     if (filters.requireMintAuthorityRevoked && safety.mintAuthority !== null && safety.mintAuthority !== undefined) {
       if (safety.mintAuthority !== "revoked") {
         reasons.push(`mint authority still set (${safety.mintAuthority})`);
@@ -127,6 +161,7 @@ export function parseFilterSet(
   switch (key) {
     case "maxTopHolderPercent":
     case "maxTop10HolderPercent":
+    case "maxBundlerPercent":
     case "minLiquidityUsd":
     case "minVolume24hUsd":
     case "minVolumeSpikeRatio":
@@ -163,6 +198,7 @@ export function describeFilters(f: FilterConfig): string {
   return [
     `maxTopHolderPercent = ${f.maxTopHolderPercent}`,
     `maxTop10HolderPercent = ${f.maxTop10HolderPercent}`,
+    `maxBundlerPercent = ${f.maxBundlerPercent}`,
     `minLiquidityUsd = ${f.minLiquidityUsd}`,
     `minVolume24hUsd = ${f.minVolume24hUsd}`,
     `minVolumeSpikeRatio = ${f.minVolumeSpikeRatio}`,

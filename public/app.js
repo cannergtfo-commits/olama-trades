@@ -144,9 +144,9 @@ function renderScan(snap) {
     return;
   }
   $("scan").innerHTML = `
-    <p class="meta" style="margin:0 0 8px">Cached ${fmtTime(ls.at)}</p>
+    <p class="meta" style="margin:0 0 8px">Cached ${fmtTime(ls.at)} · confluence / bonding / multi-TF</p>
     <table>
-      <thead><tr><th></th><th>Symbol</th><th>Spike</th><th>Liq</th><th>Vol24h</th><th>Source</th><th>Mint</th></tr></thead>
+      <thead><tr><th></th><th>Symbol</th><th>Conf</th><th>Bond</th><th>Spike</th><th>Vol TF</th><th>Tags</th><th>Risk</th><th>Mint</th></tr></thead>
       <tbody>
         ${ls.rows
           .slice(0, 25)
@@ -154,10 +154,12 @@ function renderScan(snap) {
             (r) => `<tr>
             <td><span class="tag ${r.filterPass ? "pass" : "block"}">${r.filterPass ? "PASS" : "BLOCK"}</span></td>
             <td>${r.symbol}</td>
+            <td>${r.confluenceScore != null ? Number(r.confluenceScore).toFixed(0) : "—"}</td>
+            <td>${r.bondingStatus || "—"}</td>
             <td>${Number(r.volumeSpikeRatio).toFixed(2)}x</td>
-            <td>$${Math.round(r.liquidityUsd)}</td>
-            <td>$${Math.round(r.volume24hUsd)}</td>
-            <td>${r.source}</td>
+            <td title="${r.volumeSummary || ""}">${r.volumeSummary ? r.volumeSummary.replace(/ /g, " · ") : "$" + Math.round(r.volume24hUsd)}</td>
+            <td>${(r.sourceTags && r.sourceTags.length ? r.sourceTags.join("+") : r.source)}</td>
+            <td title="${r.liquidityRiskNote || r.momentumHint || ""}">${r.liquidityRiskNote ? "⚠" : (r.momentumHint || "—")}</td>
             <td><a href="https://solscan.io/token/${r.mint}" target="_blank" rel="noopener">${short(r.mint)}</a></td>
           </tr>`
           )

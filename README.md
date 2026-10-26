@@ -1,6 +1,6 @@
 # Solana Terminal Trading Bot (experimental)
 
-Node.js + TypeScript CLI bot that scans **DexScreener**, **Pump.fun**, and **Jupiter**, looks for volume spikes / light Twitter·Grok heuristics, applies **risk filters** (including **max top-holder %**), buys a configured SOL size, then exits on **+10% take-profit** or **−25% stop-loss**.
+Node.js + TypeScript CLI bot that scans **DexScreener**, **Pump.fun**, and **Jupiter** (organic + recent), ranks by **multi-source confluence**, multi-timeframe volume, bonding/graduation status, and light momentum — then applies **risk filters** (including **max top-holder %** / bundler), buys a configured SOL size, and exits on **+10% take-profit** or **−25% stop-loss**.
 
 Includes a terminal dashboard, browser UI, and **chat with Techno** (your Grok co-pilot).
 
@@ -130,6 +130,34 @@ API: `GET /api/chat` · `POST /api/chat` body `{ "text": "…" }` (also accepts 
 npm run bot -- filters set maxTopHolderPercent 15
 ```
 
+
+## Confluence ranking (solana-skill)
+
+Analysis playbook: [`docs/solana-skill.md`](./docs/solana-skill.md) (also under `.agents/skills/solana-skill/`).
+
+Before `tryEnter`, candidates are merged across sources and scored:
+
+| Signal | Behavior |
+|--------|----------|
+| Cross-source tags | `pump` / `dex` / `jup` — prefer tokens seen on multiple |
+| Multi-TF volume | DexScreener + Jupiter `5m / 1h / 6h / 24h` when available |
+| Liquidity vs volume | Soft `vol24h / liquidity` risk flag (downrank; **not** a hard fail when `minLiquidityUsd=0`) |
+| Bonding / graduated | Prefer graduated for Jupiter routes; on-curve without route is blocked |
+| Organic Jupiter | Free `lite-api.jup.ag/tokens/v2/toporganicscore/5m` + `/recent` (no paid key) |
+| Light momentum | Approx RSI-ish hint from TF price changes — skipped gracefully if data missing |
+
+### Config knobs (defaults match current live behavior)
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `minConfluenceSources` | `1` | Set `2` to require multi-platform hits (may starve thin APIs) |
+| `maxVolumeToLiquidityRatio` | `40` | Soft risk threshold for vol/liq |
+| `preferGraduated` | `true` | Downrank / soft-block lone bonding-curve tokens |
+
+Env aliases: `MIN_CONFLUENCE_SOURCES`, `MAX_VOLUME_TO_LIQUIDITY_RATIO`, `PREFER_GRADUATED`.
+
+**API limits:** Pump.fun frontend often Cloudflare-blocks datacenter IPs (DexScreener proxy used). Jupiter portal-only Organic UI extras beyond lite-api are skipped. True OHLCV RSI needs a chart API — bot uses TF price-change proxies instead.
+
 ## Strategy defaults
 
 - Buy: `0.05 SOL` (cap `0.25`) · TP **+10%** · SL **−25%** · slippage `100` bps · max 3 open positions  
@@ -146,7 +174,9 @@ src/wallet.ts             keypair create / balance / withdraw
 src/config.ts             .env + config.json
 src/filters.ts            buy-block rules
 src/security-checks.ts    holders + mint/freeze
-src/scanners/*            dexscreener, pumpfun, jupiter
+src/scanners/*            dexscreener, pumpfun, jupiter (organic)
+src/confluence.ts         cross-source score + liq risk
+docs/solana-skill.md      analysis playbook copy
 src/signals/twitter.ts    X API, optional Grok, or heuristic
 src/swap.ts / strategy.ts Jupiter + TP/SL loop
 src/ui/tui.ts web.ts      dashboards + chat

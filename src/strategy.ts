@@ -2,9 +2,10 @@ import chalk from "chalk";
 import { loadConfig } from "./config.js";
 import { applyFilters, type CandidateToken } from "./filters.js";
 import { checkTokenSafety } from "./security-checks.js";
+import { getBalanceSol } from "./wallet.js";
 import { scanDexScreenerBoosts } from "./scanners/dexscreener.js";
 import { scanPumpFun } from "./scanners/pumpfun.js";
-import { jupiterPriceUsd, quoteBuySolForToken } from "./scanners/jupiter.js";
+import { jupiterPriceUsd, quoteBuySolForToken, scanJupiterOrganic } from "./scanners/jupiter.js";
 import { checkTwitterSignal } from "./signals/twitter.js";
 import { swapSolToToken, swapTokenToSol } from "./swap.js";
 import {
@@ -17,6 +18,14 @@ import {
 import { getTokenPriceUsd } from "./scanners/dexscreener.js";
 import { randomUUID } from "node:crypto";
 import { addTx } from "./history.js";
+import {
+  enrichAndRank,
+  liquidityRiskNote,
+  meetsMinConfluence,
+  mergeCandidates,
+  sourceTags,
+  volumeSummary,
+} from "./confluence.js";
 
 export interface ScanReportRow {
   token: CandidateToken;
@@ -25,11 +34,35 @@ export interface ScanReportRow {
   twitter?: string;
   jupiterOk?: boolean;
   safetyNote?: string;
+  confluenceScore?: number;
+  bondingStatus?: string;
+  volumeSummary?: string;
+  liquidityRiskNote?: string;
+  sourceTags?: string[];
+}
+
+/** Prefer configured buy size, never more than maxBuy, never >= portfolio, leave gas. */
+export async function computeBuySizeSol(): Promise<{ size: number; balance: number; reason?: string }> {
+  const cfg = loadConfig();
+  const balance = await getBalanceSol();
+  const pctCap = Math.max(0, Math.min(90, cfg.maxPortfolioBuyPct)) / 100;
+  const afterReserve = Math.max(0, balance - cfg.minSolReserve);
+  const portfolioCap = afterReserve * pctCap;
+  const size = Math.min(cfg.buyAmountSol, cfg.maxBuyAmountSol, portfolioCap);
+  if (size <= 0.001) {
+    return {
+      size: 0,
+      balance,
+      reason: `insufficient SOL after reserve (bal=${balance.toFixed(4)}, reserve=${cfg.minSolReserve})`,
+    };
+  }
+  return { size: Number(size.toFixed(6)), balance };
 }
 
 export async function gatherCandidates(): Promise<{ tokens: CandidateToken[]; notes: string[] }> {
   const notes: string[] = [];
   const all: CandidateToken[] = [];
+  const cfg = loadConfig();
 
   try {
     const dex = await scanDexScreenerBoosts();
@@ -48,6 +81,14 @@ export async function gatherCandidates(): Promise<{ tokens: CandidateToken[]; no
     notes.push(`Pump.fun error: ${(e as Error).message}`);
   }
 
+  try {
+    const jup = await scanJupiterOrganic();
+    notes.push(...jup.notes);
+    all.push(...jup.tokens);
+  } catch (e) {
+    notes.push(`Jupiter discovery error: ${(e as Error).message}`);
+  }
+
   // Fill missing prices via Jupiter
   const needPrice = all.filter((t) => !(t.priceUsd > 0)).map((t) => t.mint);
   if (needPrice.length) {
@@ -57,13 +98,32 @@ export async function gatherCandidates(): Promise<{ tokens: CandidateToken[]; no
     }
   }
 
-  const map = new Map<string, CandidateToken>();
-  for (const t of all) {
-    const prev = map.get(t.mint);
-    if (!prev || t.volumeSpikeRatio > prev.volumeSpikeRatio) map.set(t.mint, t);
-  }
-  const tokens = [...map.values()].sort((a, b) => b.volumeSpikeRatio - a.volumeSpikeRatio);
-  return { tokens, notes };
+  const merged = mergeCandidates(all);
+  const ranked = enrichAndRank(merged, cfg);
+  notes.push(
+    `Merged=${merged.length} ranked by confluence (minSources=${cfg.minConfluenceSources}, preferGraduated=${cfg.preferGraduated})`
+  );
+  return { tokens: ranked, notes };
+}
+
+function annotateRow(
+  token: CandidateToken,
+  fr: { pass: boolean; reasons: string[] },
+  extra: Partial<ScanReportRow> = {}
+): ScanReportRow {
+  const cfg = loadConfig();
+  const riskNote = liquidityRiskNote(token, cfg.maxVolumeToLiquidityRatio);
+  return {
+    token,
+    filterPass: fr.pass,
+    filterReasons: fr.reasons,
+    confluenceScore: token.confluenceScore,
+    bondingStatus: token.bondingStatus ?? "unknown",
+    volumeSummary: volumeSummary(token),
+    liquidityRiskNote: riskNote,
+    sourceTags: sourceTags(token),
+    ...extra,
+  };
 }
 
 export async function scanOnce(): Promise<ScanReportRow[]> {
@@ -72,31 +132,62 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
   for (const n of notes) console.log(chalk.dim(`  · ${n}`));
 
   const rows: ScanReportRow[] = [];
-  // Pre-filter on market metrics (no RPC), then deep-check a small set (public RPC is harsh)
-  const pre = tokens
-    .map((token) => ({ token, fr: applyFilters(token, cfg.filters) }))
-    .sort((a, b) => Number(b.fr.pass) - Number(a.fr.pass) || b.token.volumeSpikeRatio - a.token.volumeSpikeRatio);
+  // Prefer high-confluence first (already sorted), then market filters, then deep RPC
+  const pre = tokens.map((token) => {
+    const fr = applyFilters(token, cfg.filters);
+    if (!meetsMinConfluence(token, cfg.minConfluenceSources)) {
+      fr.reasons.push(
+        `confluence sources=${sourceTags(token).join(",") || "none"} < min ${cfg.minConfluenceSources}`
+      );
+      fr.pass = false;
+    }
+    // Soft liquidity risk: never hard-fail (minLiquidityUsd may be 0), but annotate
+    const riskNote = liquidityRiskNote(token, cfg.maxVolumeToLiquidityRatio);
+    if (riskNote && token.liquidityRisk === "high" && (token.confluenceScore ?? 0) < 40) {
+      fr.reasons.push(`${riskNote} — need higher confluence for high liq risk`);
+      fr.pass = false;
+    }
+    // Prefer graduated for routability when configured — soft downrank already in score;
+    // if still on curve AND preferGraduated, require at least 2 sources or organic score
+    if (
+      cfg.preferGraduated &&
+      token.bondingStatus === "bonding" &&
+      sourceTags(token).length < 2 &&
+      !(token.organicScore && token.organicScore >= 30)
+    ) {
+      fr.reasons.push("still on bonding curve — prefer graduated (or more sources/organic)");
+      fr.pass = false;
+    }
+    return { token, fr };
+  });
 
   const deepLimit = 5;
   let deepDone = 0;
 
   for (const { token, fr: preFr } of pre.slice(0, 40)) {
     if (!preFr.pass) {
-      rows.push({ token, filterPass: false, filterReasons: preFr.reasons });
+      rows.push(annotateRow(token, preFr));
       continue;
     }
     if (deepDone >= deepLimit) {
-      rows.push({
-        token,
-        filterPass: false,
-        filterReasons: ["passed market filters; skipped deep RPC (limit) — raise with private RPC"],
-      });
+      rows.push(
+        annotateRow(token, {
+          pass: false,
+          reasons: ["passed market+confluence; skipped deep RPC (limit) — raise with private RPC"],
+        })
+      );
       continue;
     }
     deepDone++;
     const safety = await checkTokenSafety(token.mint);
     const fr = applyFilters(token, cfg.filters, safety);
+    if (!meetsMinConfluence(token, cfg.minConfluenceSources)) {
+      fr.reasons.push(`confluence sources < min ${cfg.minConfluenceSources}`);
+      fr.pass = false;
+    }
     const tw = await checkTwitterSignal(token);
+    token.twitterTrending = tw.trending;
+    // Re-score lightly after twitter (optional bump already in scoreConfluence)
     let jupiterOk: boolean | undefined;
     if (!tw.trending) {
       fr.reasons.push(`twitter: ${tw.detail}`);
@@ -107,28 +198,39 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       if (!q.ok) {
         fr.reasons.push(`jupiter route: ${q.error ?? "no route"}`);
         fr.pass = false;
+        if (token.bondingStatus === "bonding") {
+          fr.reasons.push("on bonding curve — no Jupiter route (prefer graduated)");
+        }
       }
     }
 
-    rows.push({
-      token,
-      filterPass: fr.pass,
-      filterReasons: fr.reasons,
-      twitter: tw.detail,
-      jupiterOk,
-      safetyNote: [
-        safety.topHolderPercent !== undefined ? `top=${safety.topHolderPercent.toFixed(1)}%` : null,
-        safety.top10HolderPercent !== undefined ? `top10=${safety.top10HolderPercent.toFixed(1)}%` : null,
-        safety.mintAuthority ? `mintAuth=${safety.mintAuthority}` : null,
-        safety.freezeAuthority ? `freezeAuth=${safety.freezeAuthority}` : null,
-        ...(safety.errors ?? []).map((e) => `rpc:${e.slice(0, 60)}`),
-      ]
-        .filter(Boolean)
-        .join(", "),
-    });
+    rows.push(
+      annotateRow(token, fr, {
+        twitter: tw.detail,
+        jupiterOk,
+        safetyNote: [
+          safety.topHolderPercent !== undefined ? `top=${safety.topHolderPercent.toFixed(1)}%` : null,
+          safety.top10HolderPercent !== undefined
+            ? `top10=${safety.top10HolderPercent.toFixed(1)}%`
+            : null,
+          safety.bundlerPercent !== undefined
+            ? `bundler=${safety.bundlerPercent.toFixed(2)}%${
+                safety.bundlerSource ? `@${safety.bundlerSource}` : ""
+              }`
+            : "bundler=unknown",
+          safety.mintAuthority ? `mintAuth=${safety.mintAuthority}` : null,
+          safety.freezeAuthority ? `freezeAuth=${safety.freezeAuthority}` : null,
+          ...(safety.errors ?? []).map((e) => `rpc:${e.slice(0, 60)}`),
+        ]
+          .filter(Boolean)
+          .join(", "),
+      })
+    );
     await sleep(1200);
   }
 
+  // Keep confluence-ranked order in the report
+  rows.sort((a, b) => (b.confluenceScore ?? 0) - (a.confluenceScore ?? 0));
   return rows;
 }
 
@@ -143,6 +245,15 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
     return null;
   }
 
+  if (!meetsMinConfluence(token, cfg.minConfluenceSources)) {
+    console.log(
+      chalk.yellow(
+        `Skip ${token.symbol}: confluence ${sourceTags(token).join(",") || "none"} < min ${cfg.minConfluenceSources}`
+      )
+    );
+    return null;
+  }
+
   const safety = await checkTokenSafety(token.mint);
   const fr = applyFilters(token, cfg.filters, safety);
   const tw = await checkTwitterSignal(token);
@@ -152,7 +263,13 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
     return null;
   }
 
-  const q = await quoteBuySolForToken(token.mint, cfg.buyAmountSol);
+  const sized = await computeBuySizeSol();
+  if (sized.size <= 0) {
+    console.log(chalk.yellow(`Skip buy: ${sized.reason}`));
+    return null;
+  }
+
+  const q = await quoteBuySolForToken(token.mint, sized.size);
   if (!q.ok) {
     console.log(chalk.red(`No Jupiter route for ${token.symbol}: ${q.error}`));
     return null;
@@ -160,10 +277,10 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
 
   console.log(
     chalk.cyan(
-      `Entering ${token.symbol} (${token.mint.slice(0, 6)}…) size=${cfg.buyAmountSol} SOL dryRun=${cfg.dryRun}`
+      `Entering ${token.symbol} (${token.mint.slice(0, 6)}…) size=${sized.size} SOL (bal=${sized.balance.toFixed(4)}, max ${cfg.maxPortfolioBuyPct}% port) dryRun=${cfg.dryRun} conf=${token.confluenceScore ?? "?"} bond=${token.bondingStatus ?? "?"} tags=${sourceTags(token).join("+")}`
     )
   );
-  const swap = await swapSolToToken(token.mint, cfg.buyAmountSol);
+  const swap = await swapSolToToken(token.mint, sized.size);
   if (!swap.ok) {
     console.log(chalk.red(`Buy failed: ${swap.error}`));
     return null;
@@ -177,7 +294,7 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
     symbol: token.symbol,
     entryPriceUsd: token.priceUsd,
     amountToken: outAmount,
-    amountSolSpent: cfg.buyAmountSol,
+    amountSolSpent: sized.size,
     takeProfitPct: cfg.takeProfitPct,
     stopLossPct: cfg.stopLossPct,
     openedAt: new Date().toISOString(),
@@ -195,7 +312,7 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
     priceUsd: pos.entryPriceUsd,
     signature: pos.txBuy,
     dryRun: pos.dryRun,
-    note: "entry",
+    note: `entry conf=${token.confluenceScore ?? "?"} ${sourceTags(token).join("+")}`,
   });
   console.log(
     chalk.green(
@@ -275,16 +392,23 @@ export async function runLoop(opts: { once?: boolean } = {}): Promise<void> {
   setArmed(true);
   console.log(
     chalk.bold(
-      `\nBot run loop — BOT ON — dryRun=${cfg.dryRun} buy=${cfg.buyAmountSol} SOL TP=+${cfg.takeProfitPct}% SL=-${cfg.stopLossPct}% interval=${cfg.scanIntervalMs}ms\n`
+      `\nBot run loop — BOT ON — dryRun=${cfg.dryRun} buy=${cfg.buyAmountSol} SOL TP=+${cfg.takeProfitPct}% SL=-${cfg.stopLossPct}% interval=${cfg.scanIntervalMs}ms confluence≥${cfg.minConfluenceSources}\n`
     )
   );
 
   const tick = async () => {
-    console.log(chalk.gray(`\n── scan ${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT ──`));
+    console.log(
+      chalk.gray(
+        `\n── scan ${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT ──`
+      )
+    );
     try {
       await monitorPositions();
       const rows = await scanOnce();
-      const passes = rows.filter((r) => r.filterPass);
+      // High-confluence passes first (scanOnce already sorts by score)
+      const passes = rows
+        .filter((r) => r.filterPass)
+        .sort((a, b) => (b.confluenceScore ?? 0) - (a.confluenceScore ?? 0));
       console.log(chalk.bold(`Candidates checked=${rows.length} pass=${passes.length}`));
       for (const r of passes.slice(0, 5)) {
         await tryEnter(r.token);
