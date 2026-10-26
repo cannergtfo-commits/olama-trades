@@ -1,0 +1,33 @@
+{
+  "buyAmountSol": 0.05,
+  "maxBuyAmountSol": 0.25,
+  "takeProfitPct": 10,
+  "stopLossPct": 25,
+  "slippageBps": 100,
+  "dryRun": true,
+  "scanIntervalMs": 30000,
+  "maxOpenPositions": 3,
+  "filters": {
+    "maxTopHolderPercent": 15,
+    "maxTop10HolderPercent": 50,
+    "minLiquidityUsd": 10000,
+    "minVolume24hUsd": 5000,
+    "minVolumeSpikeRatio": 2,
+    "minTokenAgeMinutes": 5,
+    "maxTokenAgeMinutes": 10080,
+    "requireMintAuthorityRevoked": true,
+    "requireFreezeAuthorityRevoked": true,
+    "denylistMints": []
+  },
+  "twitter": {
+    "enabled": true,
+    "keywords": [
+      "pump",
+      "solana",
+      "gem",
+      "moon"
+    ],
+    "minMentionsHeuristic": 3,
+    "useMockWhenNoKey": true
+  }
+}

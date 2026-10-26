@@ -1,0 +1,38 @@
+{
+  "name": "solana-terminal-bot",
+  "version": "1.0.0",
+  "description": "Experimental Solana terminal trading bot \u2014 DexScreener / Pump.fun / Jupiter scan with TP/SL and holder filters",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "solana-bot": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "bot": "node --import tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "setup": "node --import tsx src/setup.ts",
+    "install:bot": "bash scripts/install.sh",
+    "typecheck": "tsc --noEmit",
+    "audit": "npm audit --omit=dev"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@solana/web3.js": "1.98.4",
+    "bs58": "6.0.0",
+    "chalk": "5.4.1",
+    "commander": "13.1.0",
+    "dotenv": "16.4.7",
+    "express": "4.21.2",
+    "ora": "8.2.0"
+  },
+  "devDependencies": {
+    "@types/express": "4.17.21",
+    "@types/node": "22.13.10",
+    "tsx": "4.19.3",
+    "typescript": "5.8.2"
+  },
+  "private": true
+}

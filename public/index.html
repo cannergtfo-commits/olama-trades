@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Solana Terminal Bot</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Orbitron:wght@600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="layout">
+    <div class="main-col">
+      <header class="top">
+        <div class="brand">
+          <img class="mascot" src="/mascot.jpg" alt="Bot mascot" width="88" height="88" />
+          <div class="brand-text">
+            <pre class="logo" aria-hidden="true">███████╗ ██████╗ ██╗      █████╗ ███╗   ██╗ █████╗
+██╔════╝██╔═══██╗██║     ██╔══██╗████╗  ██║██╔══██╗
+███████╗██║   ██║██║     ███████║██╔██╗ ██║███████║
+╚════██║██║   ██║██║     ██╔══██║██║╚██╗██║██╔══██║
+███████║╚██████╔╝███████╗██║  ██║██║ ╚████║██║  ██║
+╚══════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝</pre>
+            <div class="subtitle">TERMINAL TRADING BOT · DEX · PUMP · JUP</div>
+          </div>
+        </div>
+        <div class="controls">
+          <div id="badges" class="badges"></div>
+          <button id="btn-toggle" class="btn primary" type="button">BOT ON/OFF</button>
+          <button id="btn-refresh" class="btn" type="button">Refresh</button>
+          <button id="btn-scan" class="btn" type="button">Scan</button>
+          <button id="btn-tick" class="btn" type="button">Force tick</button>
+        </div>
+      </header>
+
+      <p id="toast" class="toast" hidden></p>
+      <p class="meta" id="meta">Connecting…</p>
+
+      <main class="grid">
+        <section class="card" id="card-wallet">
+          <h2>Wallet</h2>
+          <div id="wallet" class="mono"></div>
+        </section>
+        <section class="card" id="card-bot">
+          <h2>Bot control</h2>
+          <div id="bot" class="mono"></div>
+        </section>
+        <section class="card wide" id="card-positions">
+          <h2>Open positions</h2>
+          <div id="positions"></div>
+        </section>
+        <section class="card" id="card-filters">
+          <h2>Filters</h2>
+          <pre id="filters" class="mono pre"></pre>
+        </section>
+        <section class="card wide" id="card-history">
+          <h2>Tx history <span class="hint">Solscan links</span></h2>
+          <div id="history"></div>
+        </section>
+        <section class="card wide" id="card-scan">
+          <h2>Last scan</h2>
+          <div id="scan"></div>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <span>Auto-refresh every 10s via SSE · Armed state in <code>data/bot-state.json</code></span>
+        <span>Secrets never shown · Default DRY_RUN</span>
+      </footer>
+    </div>
+
+    <aside class="chat-panel" aria-label="Chat with Techno">
+      <div class="chat-head">
+        <img class="chat-avatar" src="/mascot.jpg" alt="" width="40" height="40" />
+        <div>
+          <div class="chat-title">Chat with Techno</div>
+          <div id="chat-status" class="chat-status">Connecting…</div>
+        </div>
+      </div>
+      <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" type="text" maxlength="4000" placeholder="Message Techno…" autocomplete="off" />
+        <button id="chat-send" class="btn primary" type="submit">Send</button>
+      </form>
+      <p id="chat-hint" class="chat-hint"></p>
+    </aside>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

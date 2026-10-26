@@ -1,0 +1,25 @@
+# dependencies & build
+node_modules/
+dist/
+
+# secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+.wallet/
+data/secrets/
+
+# runtime state (keep data/.gitkeep)
+data/*.json
+!data/.gitkeep
+
+# logs / OS
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# editor
+.idea/
+.vscode/
+*.swp
