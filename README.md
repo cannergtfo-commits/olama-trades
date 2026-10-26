@@ -1,6 +1,6 @@
 # Solana Terminal Trading Bot (experimental)
 
-Node.js + TypeScript CLI bot that scans **DexScreener**, **Pump.fun**, and **Jupiter** (organic + recent), ranks by **multi-source confluence**, multi-timeframe volume, bonding/graduation status, and light momentum — then applies **risk filters** (or experimental **risk-on pattern** mode), buys a configured SOL size, and exits on **+10% take-profit** or **−25% stop-loss**.
+Node.js + TypeScript CLI bot that scans **DexScreener**, **Pump.fun**, and **Jupiter** (organic + recent), ranks by **multi-source confluence**, multi-timeframe volume, bonding/graduation status, and light momentum — then applies **risk filters** (or experimental **risk-on pattern** mode), buys a configured SOL size, and exits on **+5% take-profit** or **−75% stop-loss**.
 
 Includes a terminal dashboard, browser UI, and **chat with Techno** (your Grok co-pilot).
 
@@ -205,7 +205,7 @@ When `preferPumpCallouts` / `PREFER_PUMP_CALLOUTS=true` (default), candidates ta
 
 ## Strategy defaults
 
-- Buy: `0.05 SOL` (cap `0.25`) · TP **+10%** · SL **−25%** · slippage `100` bps · max 3 open positions  
+- Buy: `0.05 SOL` (cap `0.25`) · TP **+5%** · SL **−75%** · slippage `100` bps · max 3 open positions  
 - `DRY_RUN=true` until **you** flip it in `.env` (installer never sets live mode)
 
 ## Project layout
