@@ -18,7 +18,11 @@
     "maxTokenAgeMinutes": 9999999,
     "requireMintAuthorityRevoked": false,
     "requireFreezeAuthorityRevoked": false,
-    "denylistMints": []
+    "denylistMints": [
+      "DpWQcYxhZdEsTwdniTp2x7R8qerjRMJzgCLbR3apump",
+      "EyNRftF44AJFcMz8RxaTuUob8LX8zPm4dK8YfeiHpump",
+      "6ssHazPW2ahcV9f1NHpphYh3izFyqAN7scDCSFRSpawN"
+    ]
   },
   "twitter": {
     "enabled": true,
@@ -35,10 +39,25 @@
   },
   "maxPortfolioBuyPct": 90,
   "minSolReserve": 0.01,
-  "minConfluenceSources": 0,
+  "minConfluenceSources": 1,
   "maxVolumeToLiquidityRatio": 40,
-  "preferGraduated": false,
+  "preferGraduated": true,
   "preferPumpCallouts": true,
   "riskOnTest": true,
-  "minPatternScore": 58
+  "minPatternScore": 68,
+  "minPriceChange5mPct": -1,
+  "requirePreferredPatternTag": true,
+  "preferredPatternTags": [
+    "hammer",
+    "bull_engulf",
+    "maru_bull",
+    "3soldiers"
+  ],
+  "blockedPatternTags": [
+    "shoot_star",
+    "bear_engulf",
+    "maru_bear",
+    "3crows",
+    "hang_man"
+  ]
 }

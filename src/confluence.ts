@@ -140,6 +140,13 @@ export function scoreConfluence(token: CandidateToken, cfg: AppConfig): number {
     score -= 5;
   }
 
+  // Learned: boost TP-correlated tags; downrank SL-correlated rejection tags
+  const patternTags = token.patternTags ?? [];
+  const preferred = cfg.preferredPatternTags ?? [];
+  const blocked = cfg.blockedPatternTags ?? [];
+  if (patternTags.some((t) => preferred.includes(t))) score += 8;
+  if (patternTags.some((t) => blocked.includes(t))) score -= 12;
+
   return Math.max(0, Math.min(100, Math.round(score * 10) / 10));
 }
 
@@ -267,24 +274,111 @@ export function meetsMinConfluence(token: CandidateToken, minSources: number): b
 }
 
 /**
- * Good indicator / candlestick setup for risk-on entries.
- * Bullish bias, patternScore above threshold, or mom+ hint.
+ * Tightened setup gate (post risk-on learnings from TP vs SL closes).
+ * - Soft-block SL-correlated bearish/rejection tags
+ * - Require score >= minPatternScore
+ * - Prefer TP-correlated bull tags (or very high score)
+ * - mom+ alone is NOT enough
  */
 export function hasGoodSetup(
   token: CandidateToken,
-  minPatternScore = 58
-): boolean {
-  if (token.patternBias === "bullish") return true;
-  if (typeof token.patternScore === "number" && token.patternScore >= minPatternScore) {
-    return true;
+  minPatternScore = 68,
+  opts?: {
+    preferredTags?: string[];
+    blockedTags?: string[];
+    requirePreferredTag?: boolean;
+    minPriceChange5mPct?: number;
   }
-  const hint = token.momentumHint ?? "";
-  if (hint.startsWith("mom+")) return true;
-  // Explicit bullish pattern tags even if bias neutralized
+): boolean {
   const tags = token.patternTags ?? [];
-  const bullTags = ["hammer", "bull_engulf", "maru_bull", "3soldiers"];
-  if (tags.some((t) => bullTags.includes(t))) return true;
+  const preferred =
+    opts?.preferredTags?.length
+      ? opts.preferredTags
+      : ["hammer", "bull_engulf", "maru_bull", "3soldiers"];
+  const blocked =
+    opts?.blockedTags?.length
+      ? opts.blockedTags
+      : ["shoot_star", "bear_engulf", "maru_bear", "3crows", "hang_man"];
+  const requirePreferred = opts?.requirePreferredTag !== false;
+  const min5m = opts?.minPriceChange5mPct ?? -1;
+
+  // Soft-block rejection / bearish candle tags (SL-correlated)
+  const blockedHits = tags.filter((t) => blocked.includes(t));
+  const preferredHits = tags.filter((t) => preferred.includes(t));
+  if (blockedHits.length && preferredHits.length === 0) {
+    return false;
+  }
+  if (token.patternBias === "bearish" && preferredHits.length === 0) {
+    return false;
+  }
+
+  // Fade filter: when 5m % is known, avoid hard-red entries (flash-dump cohort)
+  if (
+    typeof token.priceChange5m === "number" &&
+    Number.isFinite(token.priceChange5m) &&
+    min5m > -900 &&
+    token.priceChange5m < min5m
+  ) {
+    return false;
+  }
+
+  const score =
+    typeof token.patternScore === "number" && Number.isFinite(token.patternScore)
+      ? token.patternScore
+      : 50;
+  if (score < minPatternScore && token.patternBias !== "bullish") {
+    return false;
+  }
+
+  // Strong score can pass without preferred tag; otherwise require one
+  const veryStrong = score >= minPatternScore + 10; // e.g. 78 when min=68
+  if (requirePreferred && preferredHits.length === 0 && !veryStrong) {
+    // Allow pure bullish bias with score meeting min even without tag list
+    if (!(token.patternBias === "bullish" && score >= minPatternScore)) {
+      return false;
+    }
+  }
+
+  // Final: bullish bias or score at/above min (mom+ alone no longer enough)
+  if (token.patternBias === "bullish") return true;
+  if (score >= minPatternScore) return true;
   return false;
+}
+
+/** Human-readable why hasGoodSetup failed (for filter reasons). */
+export function setupRejectReason(
+  token: CandidateToken,
+  minPatternScore = 68,
+  opts?: {
+    preferredTags?: string[];
+    blockedTags?: string[];
+    requirePreferredTag?: boolean;
+    minPriceChange5mPct?: number;
+  }
+): string | undefined {
+  if (hasGoodSetup(token, minPatternScore, opts)) return undefined;
+  const tags = token.patternTags ?? [];
+  const preferred =
+    opts?.preferredTags?.length
+      ? opts.preferredTags
+      : ["hammer", "bull_engulf", "maru_bull", "3soldiers"];
+  const blocked =
+    opts?.blockedTags?.length
+      ? opts.blockedTags
+      : ["shoot_star", "bear_engulf", "maru_bear", "3crows", "hang_man"];
+  const blockedHits = tags.filter((t) => blocked.includes(t));
+  if (blockedHits.length && !tags.some((t) => preferred.includes(t))) {
+    return `blocked pattern tags: ${blockedHits.join(",")}`;
+  }
+  if (
+    typeof token.priceChange5m === "number" &&
+    Number.isFinite(token.priceChange5m) &&
+    (opts?.minPriceChange5mPct ?? -1) > -900 &&
+    token.priceChange5m < (opts?.minPriceChange5mPct ?? -1)
+  ) {
+    return `5m fade ${token.priceChange5m.toFixed(1)}% < min ${opts?.minPriceChange5mPct ?? -1}%`;
+  }
+  return `weak setup (bias=${token.patternBias ?? "?"} score=${token.patternScore ?? "?"} tags=${tags.join(",") || "none"} mom=${token.momentumHint ?? "n/a"})`;
 }
 
 export function liquidityRiskNote(token: CandidateToken, maxRatio: number): string | undefined {

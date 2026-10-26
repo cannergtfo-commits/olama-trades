@@ -23,6 +23,7 @@ import {
   liquidityRiskNote,
   meetsMinConfluence,
   mergeCandidates,
+  setupRejectReason,
   sortForTryEnter,
   sourceTags,
   volumeSummary,
@@ -36,6 +37,16 @@ import {
   analyzePatterns,
   fetchOhlcvForPair,
 } from "./patterns.js";
+
+
+function setupOpts(cfg: ReturnType<typeof loadConfig>) {
+  return {
+    preferredTags: cfg.preferredPatternTags,
+    blockedTags: cfg.blockedPatternTags,
+    requirePreferredTag: cfg.requirePreferredPatternTag,
+    minPriceChange5mPct: cfg.minPriceChange5mPct,
+  };
+}
 
 export interface ScanReportRow {
   token: CandidateToken;
@@ -248,10 +259,10 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       fr.reasons.push("still on bonding curve — prefer graduated (or more sources/organic)");
       fr.pass = false;
     }
-    // Risk-on / pattern mode: require bullish candle or indicator setup
-    if (riskOn && !hasGoodSetup(token, cfg.minPatternScore)) {
+    // Risk-on / pattern mode: require tightened bullish candle or indicator setup
+    if (riskOn && !hasGoodSetup(token, cfg.minPatternScore, setupOpts(cfg))) {
       fr.reasons.push(
-        `no bullish setup (bias=${token.patternBias ?? "?"} score=${token.patternScore ?? "?"} mom=${token.momentumHint ?? "n/a"})`
+        setupRejectReason(token, cfg.minPatternScore, setupOpts(cfg)) ?? "no bullish setup"
       );
       fr.pass = false;
     }
@@ -264,8 +275,8 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
   // Risk-on: quote bullish setups first so deepLimit is not wasted on weaker rows
   const ordered = riskOn
     ? [...pre].sort((a, b) => {
-        const ga = a.fr.pass && hasGoodSetup(a.token, cfg.minPatternScore) ? 1 : 0;
-        const gb = b.fr.pass && hasGoodSetup(b.token, cfg.minPatternScore) ? 1 : 0;
+        const ga = a.fr.pass && hasGoodSetup(a.token, cfg.minPatternScore, setupOpts(cfg)) ? 1 : 0;
+        const gb = b.fr.pass && hasGoodSetup(b.token, cfg.minPatternScore, setupOpts(cfg)) ? 1 : 0;
         if (gb !== ga) return gb - ga;
         const pa = a.token.patternScore ?? 50;
         const pb = b.token.patternScore ?? 50;
@@ -322,8 +333,10 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
       fr.reasons.push(`confluence sources < min ${cfg.minConfluenceSources}`);
       fr.pass = false;
     }
-    if (riskOn && !hasGoodSetup(token, cfg.minPatternScore)) {
-      fr.reasons.push(`no bullish setup (score=${token.patternScore ?? "?"})`);
+    if (riskOn && !hasGoodSetup(token, cfg.minPatternScore, setupOpts(cfg))) {
+      fr.reasons.push(
+        setupRejectReason(token, cfg.minPatternScore, setupOpts(cfg)) ?? "no bullish setup"
+      );
       fr.pass = false;
     }
     const watchedNow = resolveWatchedMints(cfg);
@@ -389,10 +402,10 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
     return null;
   }
 
-  if (riskOn && !hasGoodSetup(token, cfg.minPatternScore)) {
+  if (riskOn && !hasGoodSetup(token, cfg.minPatternScore, setupOpts(cfg))) {
     console.log(
       chalk.yellow(
-        `Skip ${token.symbol}: no bullish setup (bias=${token.patternBias ?? "?"} score=${token.patternScore ?? "?"})`
+        `Skip ${token.symbol}: ${setupRejectReason(token, cfg.minPatternScore, setupOpts(cfg)) ?? "no bullish setup"}`
       )
     );
     return null;
@@ -467,7 +480,7 @@ export async function tryEnter(token: CandidateToken): Promise<Position | null> 
     priceUsd: pos.entryPriceUsd,
     signature: pos.txBuy,
     dryRun: pos.dryRun,
-    note: `entry conf=${token.confluenceScore ?? "?"} ${sourceTags(token).join("+")}`,
+    note: `entry conf=${token.confluenceScore ?? "?"} ${sourceTags(token).join("+")} pa=${(token.patternTags ?? []).join(",") || "none"} score=${token.patternScore ?? "?"} bias=${token.patternBias ?? "?"} bond=${token.bondingStatus ?? "?"}`,
   });
   console.log(
     chalk.green(

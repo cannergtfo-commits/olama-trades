@@ -64,6 +64,17 @@ export interface AppConfig {
   riskOnTest: boolean;
   /** Min patternScore (0–100) to treat as a setup when bias is not already bullish. */
   minPatternScore: number;
+  /**
+   * When 5m % change is known, require it >= this (soft fade filter).
+   * Default -1 allows tiny red; hard fades blocked. Set -999 to disable.
+   */
+  minPriceChange5mPct: number;
+  /** If true, good setups need a preferred bullish pattern tag (unless score is very high). */
+  requirePreferredPatternTag: boolean;
+  /** Bullish candle tags that correlated with TPs — preferred for entry. */
+  preferredPatternTags: string[];
+  /** Bearish/rejection tags soft-blocked at entry (SL-correlated). */
+  blockedPatternTags: string[];
   jupiterApiKey?: string;
   xBearerToken?: string;
   heliusApiKey?: string;
@@ -175,7 +186,27 @@ export function loadConfig(): AppConfig {
     preferGraduated: bool(process.env.PREFER_GRADUATED, file.preferGraduated ?? true),
     preferPumpCallouts: bool(process.env.PREFER_PUMP_CALLOUTS, file.preferPumpCallouts ?? true),
     riskOnTest: bool(process.env.RISK_ON_TEST, file.riskOnTest ?? false),
-    minPatternScore: num(process.env.MIN_PATTERN_SCORE, file.minPatternScore ?? 58),
+    minPatternScore: num(process.env.MIN_PATTERN_SCORE, file.minPatternScore ?? 68),
+    minPriceChange5mPct: num(
+      process.env.MIN_PRICE_CHANGE_5M_PCT,
+      file.minPriceChange5mPct ?? -1
+    ),
+    requirePreferredPatternTag: bool(
+      process.env.REQUIRE_PREFERRED_PATTERN_TAG,
+      file.requirePreferredPatternTag ?? true
+    ),
+    preferredPatternTags: Array.isArray(file.preferredPatternTags) && file.preferredPatternTags.length
+      ? [...file.preferredPatternTags]
+      : (process.env.PREFERRED_PATTERN_TAGS || "hammer,bull_engulf,maru_bull,3soldiers")
+          .split(/[,\s]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+    blockedPatternTags: Array.isArray(file.blockedPatternTags) && file.blockedPatternTags.length
+      ? [...file.blockedPatternTags]
+      : (process.env.BLOCKED_PATTERN_TAGS || "shoot_star,bear_engulf,maru_bear,3crows,hang_man")
+          .split(/[,\s]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
     jupiterApiKey: process.env.JUPITER_API_KEY || undefined,
     xBearerToken: process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN || undefined,
     heliusApiKey: process.env.HELIUS_API_KEY || undefined,
