@@ -1,5 +1,6 @@
 import { SOL_MINT, loadConfig } from "../config.js";
 import type { CandidateToken } from "../filters.js";
+import { getAddress, walletExists } from "../wallet.js";
 
 const ORDER_BASE = "https://api.jup.ag/swap/v2";
 const LITE = "https://lite-api.jup.ag";
@@ -34,7 +35,9 @@ export async function quoteBuySolForToken(
   url.searchParams.set("inputMint", SOL_MINT);
   url.searchParams.set("outputMint", mint);
   url.searchParams.set("amount", String(lamports));
-  url.searchParams.set("taker", "11111111111111111111111111111111"); // placeholder for quote-only probe
+  // Use real wallet as taker — system-program placeholder returns "Insufficient funds"
+  const taker = walletExists() ? getAddress() : "11111111111111111111111111111111";
+  url.searchParams.set("taker", taker);
 
   try {
     const res = await fetch(url.toString(), {

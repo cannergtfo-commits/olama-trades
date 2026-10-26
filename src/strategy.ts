@@ -258,10 +258,23 @@ export async function scanOnce(): Promise<ScanReportRow[]> {
     return { token, fr };
   });
 
-  const deepLimit = riskOn ? 8 : 5;
+  const deepLimit = riskOn ? 15 : 5;
   let deepDone = 0;
 
-  for (const { token, fr: preFr } of pre.slice(0, 40)) {
+  // Risk-on: quote bullish setups first so deepLimit is not wasted on weaker rows
+  const ordered = riskOn
+    ? [...pre].sort((a, b) => {
+        const ga = a.fr.pass && hasGoodSetup(a.token, cfg.minPatternScore) ? 1 : 0;
+        const gb = b.fr.pass && hasGoodSetup(b.token, cfg.minPatternScore) ? 1 : 0;
+        if (gb !== ga) return gb - ga;
+        const pa = a.token.patternScore ?? 50;
+        const pb = b.token.patternScore ?? 50;
+        if (pb !== pa) return pb - pa;
+        return (b.token.confluenceScore ?? 0) - (a.token.confluenceScore ?? 0);
+      })
+    : pre;
+
+  for (const { token, fr: preFr } of ordered.slice(0, 40)) {
     if (!preFr.pass) {
       rows.push(annotateRow(token, preFr));
       continue;
